@@ -67,23 +67,19 @@ def parse_amount_with_suffix(num_str: str, suffix: str = ""):
 
 def parse_fiat_conversion_text(text: str):
     raw = (text or "").strip()
-    m_code = re.match(r"^(\d+(?:\.\d+)?)\s*([a-zA-Z]{3})\s+([a-zA-Z]{3})$", raw)
-    if m_code:
-        amt = float(m_code.group(1))
-        f_from = m_code.group(2).upper()
-        f_to = m_code.group(3).upper()
-        if f_from in COMMON_FIAT_CODES and f_to in COMMON_FIAT_CODES:
-            return amt, f_from, f_to
-
-    m_idr = re.match(r"^(\d+(?:\.\d+)?)(rb|jt)?\s*(idr|rp)?\s+([a-zA-Z]{3})$", raw, re.IGNORECASE)
-    if m_idr:
-        num_str, suffix, cur_prefix, target_fiat = m_idr.groups()
-        suffix = (suffix or "").lower()
-        cur_prefix = (cur_prefix or "").lower()
-        target_fiat = target_fiat.upper()
-        if (suffix or cur_prefix) and target_fiat in COMMON_FIAT_CODES:
-            return parse_amount_with_suffix(num_str, suffix), "IDR", target_fiat
-
+    m = re.match(
+        r"^(\d+(?:\.\d+)?)\s*(rb|jt)?\s+([a-zA-Z]{3})\s+(?:to\s+)?([a-zA-Z]{3})$",
+        raw,
+        re.IGNORECASE,
+    )
+    if m:
+        num_str, suffix, f_from, f_to = m.groups()
+        amt = parse_amount_with_suffix(num_str, (suffix or "").lower())
+        return {
+            "amount": amt,
+            "base": f_from.upper(),
+            "quote": f_to.upper(),
+        }
     return None
 
 def safe_mdv2_truncate(text: str, limit: int = 3500):

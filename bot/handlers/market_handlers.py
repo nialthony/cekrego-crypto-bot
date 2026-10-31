@@ -795,6 +795,15 @@ async def handle_idr_conversion(message: Message):
             return
 
         num_str, suffix, symbol = match.groups()
+        # Jika target adalah mata uang fiat (misal: "50rb idr jpy" atau "100rb idr usd"),
+        # arahkan ke konversi Fiat-to-Fiat agar tidak salah mencari koin kripto
+        if len(symbol) == 3 and symbol.isalpha():
+            currencies = await services.get_fiat_currencies()
+            valid_fiat = {c.get("code", "").upper() for c in currencies if isinstance(c, dict)}
+            if symbol.upper() in valid_fiat and symbol.upper() not in ("BTC", "ETH", "SOL", "BNB", "XRP", "TON", "SUI", "TRX", "ADA", "DOT"):
+                await handle_fiat_to_fiat_conversion(message)
+                return
+
         amount_idr = parse_amount_with_suffix(num_str, suffix or "")
 
         msg = await message.reply("🧮 _Kalkulasi Rupiah\\.\\.\\._", parse_mode="MarkdownV2")
@@ -831,73 +840,139 @@ async def handle_idr_conversion(message: Message):
     except Exception as e:
         await message.reply(f"Error: `{escape_md(str(e))}`", parse_mode="MarkdownV2")
 
+
 # --- 0.7. FIAT HELPER / CONVERTER ---
 @router.message(Command("fiat", "kurs"))
 async def cmd_fiat_helper(message: Message):
     limited, remain = is_rate_limited(message.from_user.id, "fiat")
     if limited:
-        await message.reply(f"Tunggu {remain} detik dulu ya :)", parse_mode=None)
+        await message.reply(f"⏳ Tunggu {remain} detik dulu ya :)", parse_mode=None)
         return
 
     content = message.text or message.caption or ""
     parts = content.split(maxsplit=1)
     query = parts[1].strip() if len(parts) > 1 else ""
 
+    # Jika user mengetik "/fiat 100 usd idr" atau "/kurs 50rb idr jpy", langsung konversi
+    if query:
+        parsed_conv = parse_fiat_conversion_text(query)
+        if parsed_conv:
+            msg = await message.reply("💱 <i>Menghitung konversi kurs fiat...</i>", parse_mode="HTML")
+            data = await services.convert_fiat(parsed_conv["amount"], parsed_conv["base"], parsed_conv["quote"])
+            if not data:
+                await msg.edit_text("❌ Gagal mengambil kurs fiat saat ini.", parse_mode="HTML")
+                return
+            result = data.get("result", 0) or 0
+            rate = data.get("rate", 0) or 0
+            base = data.get("base")
+            quote = data.get("quote")
+            text = (
+                f"💱 <b>KONVERSI MATA UANG FIAT</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"💵 <b>Input :</b> <code>{fmt_amount_raw(parsed_conv['amount'])} {base}</code>\n"
+                f"🎯 <b>Hasil :</b> <code>{fmt_amount_raw(result)} {quote}</code>\n"
+                f"📊 <b>Kurs  :</b> <code>1 {base} = {fmt_usd_raw(rate)} {quote}</code>\n"
+            )
+            await msg.edit_text(text, parse_mode="HTML")
+            return
+
     currencies = await services.get_fiat_currencies()
     if not currencies:
-        await message.reply("Gagal ambil daftar fiat saat ini.", parse_mode=None)
+        await message.reply("❌ Gagal mengambil daftar mata uang fiat saat ini.", parse_mode=None)
         return
 
     if not query:
-        common_map = {item.get("code"): item for item in currencies}
+        common_map = {item.get("code"): item for item in currencies if isinstance(item, dict)}
         lines = [
-            "FIAT HELPER",
+            "💱 <b>FIAT &amp; KURS MATA UANG DUNIA</b>",
+            "━━━━━━━━━━━━━━━━━━━━━",
+            "<b>Cara Penggunaan:</b>",
+            "• <code>/fiat idr</code> atau <code>/fiat usd</code> — Cek detail &amp; kurs live",
+            "• <code>/fiat yen</code> atau <code>/fiat riyal</code> — Cari kode mata uang",
+            "• <code>100 usd idr</code> — Konversi langsung antar fiat di chat",
+            "• <code>50rb idr jpy</code> — Konversi Rupiah ke mata uang asing",
             "",
-            "Usage:",
-            "/fiat idr",
-            "/fiat yen",
-            "100 usd idr",
-            "50rb idr jpy",
+            f"🌍 <b>Total Didukung:</b> <code>{len(currencies)}</code> mata uang dunia",
             "",
-            f"Supported: {len(currencies)} kode fiat",
-            "",
-            "Contoh populer:",
+            "<b>Kode Populer:</b>",
         ]
         for code in COMMON_FIAT_CODES:
             item = common_map.get(code)
             if not item:
                 continue
-            symbol = f" ({item.get('symbol')})" if item.get("symbol") else ""
-            lines.append(f"{code} - {item.get('name')}{symbol}")
-        await message.reply("\n".join(lines), parse_mode=None)
+            flag = item.get("flag") or "💱"
+            symbol = f" ({html.escape(item.get('symbol'))})" if item.get("symbol") else ""
+            lines.append(f"├ {flag} <code>{code}</code> — {html.escape(item.get('name', ''))}{symbol}")
+        await message.reply("\n".join(lines), parse_mode="HTML")
         return
 
     matches = await services.search_fiat_currencies(query, limit=12)
     if not matches:
         await message.reply(
-            f"Fiat '{query}' tidak ditemukan.\nCoba contoh: /fiat idr atau /fiat yen",
-            parse_mode=None
+            f"⚠️ Mata uang <code>{html.escape(query)}</code> tidak ditemukan.\n"
+            f"Coba contoh: <code>/fiat idr</code>, <code>/fiat usd</code>, atau <code>/fiat yen</code>",
+            parse_mode="HTML"
         )
         return
 
-    exact = next((item for item in matches if item.get("code", "").lower() == query.lower()), None)
+    # Jika ada match tunggal atau exact match pada kode/nama
+    exact = next(
+        (
+            item for item in matches
+            if item.get("code", "").lower() == query.lower()
+            or item.get("name", "").lower() == query.lower()
+        ),
+        matches[0] if len(matches) == 1 else None
+    )
     if exact:
-        symbol = f" ({exact.get('symbol')})" if exact.get("symbol") else ""
-        numeric = f"\nISO Numeric: {exact.get('numeric')}" if exact.get("numeric") else ""
+        code = exact.get("code", "")
+        flag = exact.get("flag") or "💱"
+        symbol = f" ({html.escape(exact.get('symbol'))})" if exact.get("symbol") else ""
+        numeric = f"\n├ <b>ISO Numeric:</b> <code>{exact.get('numeric')}</code>" if exact.get("numeric") else ""
+
+        # Ambil live kurs terhadap mata uang utama
+        rate_lines = []
+        if code == "IDR":
+            benchmarks = [("USD", "🇺🇸"), ("SGD", "🇸🇬"), ("EUR", "🇪🇺"), ("MYR", "🇲🇾"), ("JPY", "🇯🇵"), ("SAR", "🇸🇦")]
+            rates = await asyncio.gather(*(services.get_fiat_rate(b, "IDR") for b, _ in benchmarks), return_exceptions=True)
+            for (b_code, b_flag), r_val in zip(benchmarks, rates):
+                if isinstance(r_val, (int, float)) and r_val > 0:
+                    rate_lines.append(f"├ {b_flag} <code>1 {b_code}</code> = <code>Rp{fmt_idr_raw(r_val)}</code>")
+        else:
+            r_to_idr, r_from_usd = await asyncio.gather(
+                services.get_fiat_rate(code, "IDR"),
+                services.get_fiat_rate("USD", code),
+                return_exceptions=True
+            )
+            if isinstance(r_to_idr, (int, float)) and r_to_idr > 0:
+                rate_lines.append(f"├ 🇮🇩 <code>1 {code}</code> = <code>Rp{fmt_idr_raw(r_to_idr)} IDR</code>")
+            if code != "USD" and isinstance(r_from_usd, (int, float)) and r_from_usd > 0:
+                rate_lines.append(f"├ 🇺🇸 <code>1 USD</code> = <code>{fmt_usd_raw(r_from_usd)} {code}</code>")
+
+        rate_block = ""
+        if rate_lines:
+            rate_block = "\n\n📊 <b>Kurs Real-Time Saat Ini:</b>\n" + "\n".join(rate_lines)
+
         text = (
-            f"FIAT DETAIL\n\n"
-            f"Code: {exact.get('code')}\n"
-            f"Name: {exact.get('name')}{symbol}"
+            f"{flag} <b>FIAT CURRENCY DETAIL</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"├ <b>Kode ISO:</b> <code>{code}</code>\n"
+            f"├ <b>Nama:</b> {html.escape(exact.get('name', ''))}{symbol}"
             f"{numeric}"
+            f"{rate_block}\n\n"
+            f"💡 <i>Ketik <code>100 {code.lower()} idr</code> untuk konversi cepat!</i>"
         )
-        await message.reply(text, parse_mode=None)
+        await message.reply(text, parse_mode="HTML")
         return
 
-    lines = [f"FIAT MATCHES untuk '{query}'", ""]
+    lines = [f"🔍 <b>Hasil pencarian fiat untuk '{html.escape(query)}':</b>", ""]
     for item in matches[:10]:
-        symbol = f" ({item.get('symbol')})" if item.get("symbol") else ""
-        lines.append(f"{item.get('code')} - {item.get('name')}{symbol}")
-    await message.reply("\n".join(lines), parse_mode=None)
+        flag = item.get("flag") or "💱"
+        symbol = f" ({html.escape(item.get('symbol'))})" if item.get("symbol") else ""
+        lines.append(f"• {flag} <code>{item.get('code')}</code> — {html.escape(item.get('name', ''))}{symbol}")
+    lines.append("\n<i>Ketik <code>/fiat [kode]</code> untuk melihat kurs live.</i>")
+    await message.reply("\n".join(lines), parse_mode="HTML")
+
 
 @router.message(F.text.regexp(r"^\s*(\d+(?:\.\d+)?)\s*(rb|jt)?\s+[a-zA-Z]{3}\s+(?:to\s+)?[a-zA-Z]{3}\s*$"))
 async def handle_fiat_to_fiat_conversion(message: Message):
@@ -911,26 +986,26 @@ async def handle_fiat_to_fiat_conversion(message: Message):
         amount = parsed["amount"]
 
         currencies = await services.get_fiat_currencies()
-        valid_codes = {item.get("code", "").upper() for item in currencies}
+        valid_codes = {item.get("code", "").upper() for item in currencies if isinstance(item, dict)}
         if base not in valid_codes or quote not in valid_codes:
             return
 
-        msg = await message.reply("Cek kurs fiat...", parse_mode=None)
+        msg = await message.reply("💱 <i>Mengecek kurs fiat...</i>", parse_mode="HTML")
         data = await services.convert_fiat(amount, base, quote)
         if not data:
-            await msg.edit_text("Gagal ambil kurs fiat.", parse_mode=None)
+            await msg.edit_text("❌ Gagal mengambil kurs fiat saat ini.", parse_mode="HTML")
             return
 
         result = data.get("result", 0) or 0
         rate = data.get("rate", 0) or 0
 
         text = (
-            "KONVERSI FIAT\n\n"
-            f"{fmt_amount_raw(amount)} {base} = {fmt_amount_raw(result)} {quote}\n"
-            f"Rate: 1 {base} = {fmt_usd_raw(rate)} {quote}\n"
-            f"Date: {data.get('date') or '-'}\n"
+            f"💱 <b>KONVERSI MATA UANG FIAT</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"💵 <b>{fmt_amount_raw(amount)} {base}</b> = <b>{fmt_amount_raw(result)} {quote}</b>\n"
+            f"📊 <b>Kurs:</b> <code>1 {base} = {fmt_usd_raw(rate)} {quote}</code>"
         )
-        await msg.edit_text(text, parse_mode=None)
+        await msg.edit_text(text, parse_mode="HTML")
     except Exception as e:
         await message.reply(f"Error: `{escape_md(str(e))}`", parse_mode="MarkdownV2")
 

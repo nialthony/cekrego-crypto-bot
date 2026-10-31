@@ -97,41 +97,155 @@ async def get_price(crypto_id, vs_currency="usd", force_refresh=False):
         PRICE_CACHE[cache_key] = {"data": data, "time": now}
     return data
 
+FIAT_METADATA = {
+    "IDR": {"name": "Indonesian Rupiah", "symbol": "Rp", "flag": "🇮🇩", "numeric": "360"},
+    "USD": {"name": "US Dollar", "symbol": "$", "flag": "🇺🇸", "numeric": "840"},
+    "EUR": {"name": "Euro", "symbol": "€", "flag": "🇪🇺", "numeric": "978"},
+    "SGD": {"name": "Singapore Dollar", "symbol": "S$", "flag": "🇸🇬", "numeric": "702"},
+    "JPY": {"name": "Japanese Yen", "symbol": "¥", "flag": "🇯🇵", "numeric": "392"},
+    "MYR": {"name": "Malaysian Ringgit", "symbol": "RM", "flag": "🇲🇾", "numeric": "458"},
+    "CNY": {"name": "Chinese Yuan", "symbol": "¥", "flag": "🇨🇳", "numeric": "156"},
+    "HKD": {"name": "Hong Kong Dollar", "symbol": "HK$", "flag": "🇭🇰", "numeric": "344"},
+    "GBP": {"name": "British Pound", "symbol": "£", "flag": "🇬🇧", "numeric": "826"},
+    "AUD": {"name": "Australian Dollar", "symbol": "A$", "flag": "🇦🇺", "numeric": "036"},
+    "CAD": {"name": "Canadian Dollar", "symbol": "C$", "flag": "🇨🇦", "numeric": "124"},
+    "CHF": {"name": "Swiss Franc", "symbol": "CHF", "flag": "🇨🇭", "numeric": "756"},
+    "KRW": {"name": "South Korean Won", "symbol": "₩", "flag": "🇰🇷", "numeric": "410"},
+    "THB": {"name": "Thai Baht", "symbol": "฿", "flag": "🇹🇭", "numeric": "764"},
+    "VND": {"name": "Vietnamese Dong", "symbol": "₫", "flag": "🇻🇳", "numeric": "704"},
+    "PHP": {"name": "Philippine Peso", "symbol": "₱", "flag": "🇵🇭", "numeric": "608"},
+    "INR": {"name": "Indian Rupee", "symbol": "₹", "flag": "🇮🇳", "numeric": "356"},
+    "TWD": {"name": "New Taiwan Dollar", "symbol": "NT$", "flag": "🇹🇼", "numeric": "901"},
+    "SAR": {"name": "Saudi Riyal", "symbol": "﷼", "flag": "🇸🇦", "numeric": "682"},
+    "AED": {"name": "UAE Dirham", "symbol": "د.إ", "flag": "🇦🇪", "numeric": "784"},
+    "TRY": {"name": "Turkish Lira", "symbol": "₺", "flag": "🇹🇷", "numeric": "949"},
+    "RUB": {"name": "Russian Ruble", "symbol": "₽", "flag": "🇷🇺", "numeric": "643"},
+    "BRL": {"name": "Brazilian Real", "symbol": "R$", "flag": "🇧🇷", "numeric": "986"},
+    "MXN": {"name": "Mexican Peso", "symbol": "Mex$", "flag": "🇲🇽", "numeric": "484"},
+    "ZAR": {"name": "South African Rand", "symbol": "R", "flag": "🇿🇦", "numeric": "710"},
+    "NZD": {"name": "New Zealand Dollar", "symbol": "NZ$", "flag": "🇳🇿", "numeric": "554"},
+    "SEK": {"name": "Swedish Krona", "symbol": "kr", "flag": "🇸🇪", "numeric": "752"},
+    "NOK": {"name": "Norwegian Krone", "symbol": "kr", "flag": "🇳🇴", "numeric": "578"},
+    "DKK": {"name": "Danish Krone", "symbol": "kr", "flag": "🇩🇰", "numeric": "208"},
+    "PLN": {"name": "Polish Zloty", "symbol": "zł", "flag": "🇵🇱", "numeric": "985"},
+    "PKR": {"name": "Pakistani Rupee", "symbol": "₨", "flag": "🇵🇰", "numeric": "586"},
+    "BDT": {"name": "Bangladeshi Taka", "symbol": "৳", "flag": "🇧🇩", "numeric": "050"},
+    "EGP": {"name": "Egyptian Pound", "symbol": "E£", "flag": "🇪🇬", "numeric": "818"},
+    "NGN": {"name": "Nigerian Naira", "symbol": "₦", "flag": "🇳🇬", "numeric": "566"},
+    "ARS": {"name": "Argentine Peso", "symbol": "$", "flag": "🇦🇷", "numeric": "032"},
+    "CLP": {"name": "Chilean Peso", "symbol": "$", "flag": "🇨🇱", "numeric": "152"},
+    "COP": {"name": "Colombian Peso", "symbol": "$", "flag": "🇨🇴", "numeric": "170"},
+    "PEN": {"name": "Peruvian Sol", "symbol": "S/", "flag": "🇵🇪", "numeric": "604"},
+    "ILS": {"name": "Israeli New Shekel", "symbol": "₪", "flag": "🇮🇱", "numeric": "376"},
+    "QAR": {"name": "Qatari Riyal", "symbol": "﷼", "flag": "🇶🇦", "numeric": "634"},
+    "KWD": {"name": "Kuwaiti Dinar", "symbol": "د.ك", "flag": "🇰🇼", "numeric": "414"},
+    "BHD": {"name": "Bahraini Dinar", "symbol": ".د.ب", "flag": "🇧🇭", "numeric": "048"},
+    "OMR": {"name": "Omani Rial", "symbol": "﷼", "flag": "🇴🇲", "numeric": "512"},
+}
+
+
+FIAT_METADATA = {
+    "IDR": {"name": "Indonesian Rupiah", "symbol": "Rp", "flag": "🇮🇩", "numeric": "360"},
+    "USD": {"name": "US Dollar", "symbol": "$", "flag": "🇺🇸", "numeric": "840"},
+    "EUR": {"name": "Euro", "symbol": "€", "flag": "🇪🇺", "numeric": "978"},
+    "SGD": {"name": "Singapore Dollar", "symbol": "S$", "flag": "🇸🇬", "numeric": "702"},
+    "JPY": {"name": "Japanese Yen", "symbol": "¥", "flag": "🇯🇵", "numeric": "392"},
+    "MYR": {"name": "Malaysian Ringgit", "symbol": "RM", "flag": "🇲🇾", "numeric": "458"},
+    "CNY": {"name": "Chinese Yuan", "symbol": "¥", "flag": "🇨🇳", "numeric": "156"},
+    "HKD": {"name": "Hong Kong Dollar", "symbol": "HK$", "flag": "🇭🇰", "numeric": "344"},
+    "GBP": {"name": "British Pound", "symbol": "£", "flag": "🇬🇧", "numeric": "826"},
+    "AUD": {"name": "Australian Dollar", "symbol": "A$", "flag": "🇦🇺", "numeric": "036"},
+    "CAD": {"name": "Canadian Dollar", "symbol": "C$", "flag": "🇨🇦", "numeric": "124"},
+    "CHF": {"name": "Swiss Franc", "symbol": "CHF", "flag": "🇨🇭", "numeric": "756"},
+    "KRW": {"name": "South Korean Won", "symbol": "₩", "flag": "🇰🇷", "numeric": "410"},
+    "THB": {"name": "Thai Baht", "symbol": "฿", "flag": "🇹🇭", "numeric": "764"},
+    "VND": {"name": "Vietnamese Dong", "symbol": "₫", "flag": "🇻🇳", "numeric": "704"},
+    "PHP": {"name": "Philippine Peso", "symbol": "₱", "flag": "🇵🇭", "numeric": "608"},
+    "INR": {"name": "Indian Rupee", "symbol": "₹", "flag": "🇮🇳", "numeric": "356"},
+    "TWD": {"name": "New Taiwan Dollar", "symbol": "NT$", "flag": "🇹🇼", "numeric": "901"},
+    "SAR": {"name": "Saudi Riyal", "symbol": "﷼", "flag": "🇸🇦", "numeric": "682"},
+    "AED": {"name": "UAE Dirham", "symbol": "د.إ", "flag": "🇦🇪", "numeric": "784"},
+    "TRY": {"name": "Turkish Lira", "symbol": "₺", "flag": "🇹🇷", "numeric": "949"},
+    "RUB": {"name": "Russian Ruble", "symbol": "₽", "flag": "🇷🇺", "numeric": "643"},
+    "BRL": {"name": "Brazilian Real", "symbol": "R$", "flag": "🇧🇷", "numeric": "986"},
+    "MXN": {"name": "Mexican Peso", "symbol": "Mex$", "flag": "🇲🇽", "numeric": "484"},
+    "ZAR": {"name": "South African Rand", "symbol": "R", "flag": "🇿🇦", "numeric": "710"},
+    "NZD": {"name": "New Zealand Dollar", "symbol": "NZ$", "flag": "🇳🇿", "numeric": "554"},
+    "SEK": {"name": "Swedish Krona", "symbol": "kr", "flag": "🇸🇪", "numeric": "752"},
+    "NOK": {"name": "Norwegian Krone", "symbol": "kr", "flag": "🇳🇴", "numeric": "578"},
+    "DKK": {"name": "Danish Krone", "symbol": "kr", "flag": "🇩🇰", "numeric": "208"},
+    "PLN": {"name": "Polish Zloty", "symbol": "zł", "flag": "🇵🇱", "numeric": "985"},
+    "PKR": {"name": "Pakistani Rupee", "symbol": "₨", "flag": "🇵🇰", "numeric": "586"},
+    "BDT": {"name": "Bangladeshi Taka", "symbol": "৳", "flag": "🇧🇩", "numeric": "050"},
+    "EGP": {"name": "Egyptian Pound", "symbol": "E£", "flag": "🇪🇬", "numeric": "818"},
+    "NGN": {"name": "Nigerian Naira", "symbol": "₦", "flag": "🇳🇬", "numeric": "566"},
+    "ARS": {"name": "Argentine Peso", "symbol": "$", "flag": "🇦🇷", "numeric": "032"},
+    "CLP": {"name": "Chilean Peso", "symbol": "$", "flag": "🇨🇱", "numeric": "152"},
+    "COP": {"name": "Colombian Peso", "symbol": "$", "flag": "🇨🇴", "numeric": "170"},
+    "PEN": {"name": "Peruvian Sol", "symbol": "S/", "flag": "🇵🇪", "numeric": "604"},
+    "ILS": {"name": "Israeli New Shekel", "symbol": "₪", "flag": "🇮🇱", "numeric": "376"},
+    "QAR": {"name": "Qatari Riyal", "symbol": "﷼", "flag": "🇶🇦", "numeric": "634"},
+    "KWD": {"name": "Kuwaiti Dinar", "symbol": "د.ك", "flag": "🇰🇼", "numeric": "414"},
+    "BHD": {"name": "Bahraini Dinar", "symbol": ".د.ب", "flag": "🇧🇭", "numeric": "048"},
+    "OMR": {"name": "Omani Rial", "symbol": "﷼", "flag": "🇴🇲", "numeric": "512"},
+}
+
+
 async def get_fiat_currencies():
     now = time.time()
     if FIAT_LIST_CACHE["data"] and now - FIAT_LIST_CACHE["time"] < 86400:
         return FIAT_LIST_CACHE["data"]
 
-    data = await get_json("simple/supported_vs_currencies")
-    if data and isinstance(data, list):
-        normalized = sorted({c.upper() for c in data if isinstance(c, str)})
-        FIAT_LIST_CACHE["data"] = normalized
-        FIAT_LIST_CACHE["time"] = now
-        return normalized
+    codes = set(FIAT_METADATA.keys())
+    # Also fetch open.er-api.com USD rates to discover all supported world ISO fiat codes
+    er_data = await get_json_url("https://open.er-api.com/v6/latest/USD")
+    if er_data and isinstance(er_data.get("rates"), dict):
+        for c in er_data["rates"].keys():
+            if isinstance(c, str) and len(c) == 3 and c.isalpha():
+                codes.add(c.upper())
 
-    fallback = [
-        "USD", "IDR", "EUR", "GBP", "JPY", "SGD", "MYR", "AUD", "CAD",
-        "CNY", "HKD", "KRW", "INR", "THB", "PHP", "TWD", "VND", "BRL",
-        "RUB", "TRY", "CHF", "NZD", "MXN", "ZAR", "AED", "SAR"
-    ]
-    FIAT_LIST_CACHE["data"] = sorted(set(fallback))
+    result = []
+    for code in sorted(codes):
+        meta = FIAT_METADATA.get(code, {})
+        result.append({
+            "code": code,
+            "name": meta.get("name", f"{code} Currency"),
+            "symbol": meta.get("symbol", ""),
+            "flag": meta.get("flag", "💱"),
+            "numeric": meta.get("numeric", ""),
+        })
+
+    FIAT_LIST_CACHE["data"] = result
     FIAT_LIST_CACHE["time"] = now
-    return FIAT_LIST_CACHE["data"]
+    return result
+
 
 async def search_fiat_currencies(query, limit=12):
-    q = (query or "").strip().upper()
+    q = (query or "").strip().lower()
     currencies = await get_fiat_currencies()
     if not q:
         return currencies[:limit]
 
-    exact = [c for c in currencies if c == q]
-    prefix = [c for c in currencies if c.startswith(q) and c != q]
-    contains = [c for c in currencies if q in c and not c.startswith(q)]
+    exact = []
+    prefix = []
+    contains = []
+    for item in currencies:
+        code_l = item.get("code", "").lower()
+        name_l = item.get("name", "").lower()
+        sym_l = item.get("symbol", "").lower()
+        if code_l == q or name_l == q or (sym_l and sym_l == q):
+            exact.append(item)
+        elif code_l.startswith(q) or name_l.startswith(q):
+            prefix.append(item)
+        elif q in code_l or q in name_l or (sym_l and q in sym_l):
+            contains.append(item)
+
     return (exact + prefix + contains)[:limit]
 
+
 async def get_fiat_rate(base_currency, quote_currency):
-    base = (base_currency or "").strip().lower()
-    quote = (quote_currency or "").strip().lower()
+    base = (base_currency or "").strip().upper()
+    quote = (quote_currency or "").strip().upper()
     if not base or not quote:
         return None
     if base == quote:
@@ -139,38 +253,64 @@ async def get_fiat_rate(base_currency, quote_currency):
 
     cache_key = f"{base}_{quote}"
     now = time.time()
-    _prune_cache(FIAT_RATE_CACHE, max_size=200, ttl=180)
+    _prune_cache(FIAT_RATE_CACHE, max_size=400, ttl=300)
 
     if cache_key in FIAT_RATE_CACHE:
-        if now - FIAT_RATE_CACHE[cache_key]["time"] < 180:
+        if now - FIAT_RATE_CACHE[cache_key]["time"] < 300:
             return FIAT_RATE_CACHE[cache_key]["rate"]
 
+    # Primary: Open Exchange Rates API (supports 160+ world fiat currencies accurately)
+    er_data = await get_json_url(f"https://open.er-api.com/v6/latest/{base}")
+    if er_data and isinstance(er_data.get("rates"), dict):
+        rates = er_data["rates"]
+        if quote in rates and rates[quote]:
+            rate = float(rates[quote])
+            FIAT_RATE_CACHE[cache_key] = {
+                "rate": rate,
+                "date": er_data.get("time_last_update_utc", ""),
+                "time": now,
+            }
+            return rate
+
+    # Fallback: CoinGecko USDT cross-rate
     data = await get_json("simple/price", {
         "ids": "tether",
-        "vs_currencies": f"{base},{quote}"
+        "vs_currencies": f"{base.lower()},{quote.lower()}"
     })
-    if not data or "tether" not in data:
-        return None
+    if data and "tether" in data:
+        tether_rates = data["tether"]
+        base_in_usdt = tether_rates.get(base.lower())
+        quote_in_usdt = tether_rates.get(quote.lower())
+        if base_in_usdt and quote_in_usdt:
+            rate = float(quote_in_usdt) / float(base_in_usdt)
+            FIAT_RATE_CACHE[cache_key] = {"rate": rate, "date": "", "time": now}
+            return rate
 
-    tether_rates = data["tether"]
-    base_in_usdt = tether_rates.get(base)
-    quote_in_usdt = tether_rates.get(quote)
-    if not base_in_usdt or not quote_in_usdt:
-        return None
+    return None
 
-    rate = float(quote_in_usdt) / float(base_in_usdt)
-    FIAT_RATE_CACHE[cache_key] = {"rate": rate, "time": now}
-    return rate
 
 async def convert_fiat(amount, base_currency, quote_currency):
-    rate = await get_fiat_rate(base_currency, quote_currency)
+    base = (base_currency or "").strip().upper()
+    quote = (quote_currency or "").strip().upper()
+    rate = await get_fiat_rate(base, quote)
     if rate is None:
-        return None, None
+        return None
     try:
-        converted = float(amount) * float(rate)
-        return converted, rate
-    except:
-        return None, None
+        amt = float(amount)
+        converted = amt * float(rate)
+        cache_entry = FIAT_RATE_CACHE.get(f"{base}_{quote}") or {}
+        date_str = cache_entry.get("date") or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        return {
+            "amount": amt,
+            "base": base,
+            "quote": quote,
+            "result": converted,
+            "rate": float(rate),
+            "date": date_str,
+        }
+    except Exception:
+        return None
+
 
 async def search_coin(query):
     now = time.time()
