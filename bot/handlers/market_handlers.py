@@ -1756,40 +1756,195 @@ async def cmd_add(message: Message):
     await database.add_preferred_id(parts[1], parts[2])
     await message.reply(f"✅ Saved `{escape_md(parts[1])}` ➔ `{escape_md(parts[2])}`", parse_mode="MarkdownV2")
 
-# --- START/HELP ---
+# --- START/HELP INTERACTIVE MENU ---
+def _build_help_view(tab: str = "home") -> tuple[str, InlineKeyboardMarkup]:
+    tab = (tab or "home").lower().strip()
+
+    if tab == "market":
+        text = (
+            "📈 <b>MARKET DATA, HARGA &amp; CHART</b>\n"
+            "<i>Data harga global real-time, grafik visual &amp; likuidasi futures</i>\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🔹 <b>Cek Harga &amp; Konversi Cepat</b>\n"
+            "├ <code>/p &lt;koin&gt;</code> — Cek harga &amp; statistik koin\n"
+            "├ <code>/p &lt;jumlah&gt; &lt;koin&gt;</code> — Konversi koin ke USD &amp; IDR\n"
+            "└ <i>Contoh:</i> <code>/p btc</code> atau <code>/p 50 sol</code>\n\n"
+            "🔹 <b>Trigger Chat Otomatis (Tanpa Command)</b>\n"
+            "├ <code>1 btc</code> / <code>50 doge</code> — Cek harga langsung di chat\n"
+            "├ <code>50rb idr sol</code> — Konversi Rupiah ke jumlah koin\n"
+            "└ <code>100 usd idr</code> — Konversi nilai antar mata uang fiat\n\n"
+            "🔹 <b>Chart &amp; Eksplorasi Bursa</b>\n"
+            "├ <code>/c &lt;koin&gt; [1|7|30]</code> — Grafik harga (1, 7, atau 30 hari)\n"
+            "├ <code>/market &lt;koin&gt;</code> — Daftar bursa CEX &amp; DEX beserta volume\n"
+            "├ <code>/trend</code> — Top koin paling trending di CoinGecko\n"
+            "├ <code>/gnr</code> &amp; <code>/lsr</code> — Top Gainers &amp; Top Losers (24 Jam)\n"
+            "└ <code>/liq [koin]</code> — Stream likuidasi posisi Long/Short Binance"
+        )
+    elif tab == "dex":
+        text = (
+            "🛡️ <b>ON-CHAIN DEX RADAR &amp; RUGCHECK</b>\n"
+            "<i>Pemindaian token DEX real-time &amp; audit keamanan kontrak pintar</i>\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🔹 <b>DexScreener On-Chain Radar</b>\n"
+            "├ <code>/dex &lt;simbol / nama&gt;</code> — Cari pair DEX berdasarkan nama\n"
+            "├ <code>/dex &lt;contract_address&gt;</code> — Cek detail token via CA\n"
+            "└ <i>Contoh:</i> <code>/dex bonk</code> atau <code>/dex pepe</code>\n\n"
+            "🔹 <b>Smart Contract &amp; RugCheck Scanner</b>\n"
+            "├ <code>/rug &lt;CA / simbol&gt;</code> — Audit keamanan kontrak mendalam\n"
+            "├ <b>Solana (RugCheck.xyz):</b> Risk Score, Mint/Freeze Authority,\n"
+            "│  LP Locked %, Insider Networks &amp; Top 10 Holders (Non-LP)\n"
+            "└ <b>EVM (GoPlus Security):</b> Honeypot check, Verified Source,\n"
+            "   Buy/Sell Tax, Ownership Renounced &amp; Top Holders\n\n"
+            "🔹 <b>Auto-Detect &amp; Pump.fun Graduation Radar</b>\n"
+            "├ <b>Paste CA Langsung:</b> Kirim alamat kontrak Solana/EVM di chat\n"
+            "│  tanpa command untuk membuka kartu DEX + RugCheck otomatis\n"
+            "└ <code>/graduated</code> (<code>/alpha</code>) — Radar koin baru lulus Pump.fun ➔ Raydium"
+        )
+    elif tab == "ai":
+        text = (
+            "🧠 <b>AI INTELLIGENCE &amp; QUANT SIGNALS</b>\n"
+            "<i>Analisis teknikal, fundamental &amp; sinyal kuantitatif real-time</i>\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🔹 <b>AI Trading Signal &amp; Technical Setup</b>\n"
+            "├ <code>/ai &lt;koin&gt;</code> — Analisis indikator TA (RSI, MACD, EMA, BB, ATR)\n"
+            "│  + sentimen berita untuk menghasilkan setup LONG/SHORT/WAIT,\n"
+            "│  level Entry, Take Profit, Stop Loss &amp; Risk Score\n"
+            "└ <i>Contoh:</i> <code>/ai btc</code> atau <code>/ai sol</code>\n\n"
+            "🔹 <b>Live Quant Signals (signals.x70.ai)</b>\n"
+            "├ <code>/signals</code> (<code>/x70</code>) — Daftar sinyal quant yang sedang aktif\n"
+            "└ <code>/signals &lt;koin&gt;</code> — Cek Whale Flow &amp; Orderbook koin tertentu\n\n"
+            "🔹 <b>Riset Fundamental &amp; Diskusi AI</b>\n"
+            "├ <code>/news &lt;koin&gt;</code> — Ringkasan berita terbaru &amp; sentimen pasar\n"
+            "├ <code>/thesis &lt;koin&gt;</code> — Analisis Bull/Bear case &amp; katalis utama\n"
+            "└ <code>/ask &lt;pertanyaan&gt;</code> — Tanya jawab AI (bisa di-<i>reply</i> berlanjut)"
+        )
+    elif tab == "tools":
+        text = (
+            "🛠️ <b>UTILITAS, KALENDER &amp; LAPORAN HARIAN</b>\n"
+            "<i>Alat bantu trading harian, jadwal makro &amp; otomatisasi</i>\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🔹 <b>Kalender Makro &amp; Event Kripto</b>\n"
+            "├ <code>/calendar</code> — Jadwal event penting 7 hari ke depan\n"
+            "└ <code>/calendar &lt;hari&gt;</code> — Rentang khusus (1–30 hari, UTC &amp; WIB)\n\n"
+            "🔹 <b>Kalkulator, Kurs Fiat &amp; Zona Waktu</b>\n"
+            "├ <code>/calc &lt;ekspresi&gt;</code> — Kalkulator aman (atau ketik <code>100*25/2</code>)\n"
+            "├ <code>/fiat &lt;kode&gt;</code> — Cek kurs &amp; info mata uang fiat (<code>/fiat idr</code>)\n"
+            "└ <code>20:00 UTC</code> — Ketik jam UTC di chat untuk auto-konversi ke WIB\n\n"
+            "🔹 <b>Laporan Harian &amp; Sistem</b>\n"
+            "├ <code>/daily on</code> | <code>/daily off</code> — Langganan laporan pasar otomatis\n"
+            "│  setiap pukul 07:00 &amp; 23:00 WIB\n"
+            "└ <code>/adminstats</code> — Dashboard analitik penggunaan bot <i>(Admin)</i>"
+        )
+    elif tab == "all":
+        text = (
+            "📋 <b>DAFTAR LENGKAP COMMAND CEKREGO</b>\n"
+            "<i>Klik pada bagian di bawah untuk membuka/melipat rincian</i>\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "<b>📈 Market, Harga &amp; Chart</b>\n"
+            "<blockquote expandable>"
+            "• <code>/p &lt;jml&gt; &lt;koin&gt;</code> : Cek harga &amp; konversi\n"
+            "• <code>1 btc</code> / <code>50rb idr sol</code> : Trigger konversi cepat\n"
+            "• <code>/c &lt;koin&gt; [1|7|30]</code> : Grafik harga visual\n"
+            "• <code>/market &lt;koin&gt;</code> : Daftar listing CEX &amp; DEX\n"
+            "• <code>/trend</code> : Koin trending di CoinGecko\n"
+            "• <code>/gnr</code> | <code>/lsr</code> : Top Gainers &amp; Top Losers 24h\n"
+            "• <code>/liq [koin]</code> : Realtime liquidation feed"
+            "</blockquote>\n\n"
+            "<b>🛡️ On-Chain DEX &amp; RugCheck</b>\n"
+            "<blockquote expandable>"
+            "• <code>/dex &lt;koin / CA&gt;</code> : Kartu DexScreener + RugCheck\n"
+            "• <code>/rug &lt;CA / koin&gt;</code> : Audit keamanan kontrak &amp; Top Holders\n"
+            "• <code>Paste CA</code> : Auto-detect kontrak Solana &amp; EVM\n"
+            "• <code>/graduated</code> : Radar token lulus Pump.fun ➔ Raydium"
+            "</blockquote>\n\n"
+            "<b>🧠 AI &amp; Quant Signals</b>\n"
+            "<blockquote expandable>"
+            "• <code>/ai &lt;koin&gt;</code> : Prediksi sinyal TA + Fundamental\n"
+            "• <code>/signals [koin]</code> : Live quant signals (signals.x70.ai)\n"
+            "• <code>/news &lt;koin&gt;</code> : Ringkasan berita &amp; sentimen koin\n"
+            "• <code>/thesis &lt;koin&gt;</code> : Bull &amp; Bear thesis koin\n"
+            "• <code>/ask &lt;pertanyaan&gt;</code> : Tanya jawab AI interaktif"
+            "</blockquote>\n\n"
+            "<b>🛠️ Utilitas &amp; Laporan</b>\n"
+            "<blockquote expandable>"
+            "• <code>/calendar [hari]</code> : Kalender event makro &amp; kripto\n"
+            "• <code>/calc &lt;ekspresi&gt;</code> : Kalkulator matematika aman\n"
+            "• <code>/fiat &lt;kode&gt;</code> : Info mata uang fiat\n"
+            "• <code>20:00 UTC</code> : Auto-convert jam UTC ke WIB\n"
+            "• <code>/daily on|off</code> : Laporan harian (07:00 &amp; 23:00 WIB)"
+            "</blockquote>"
+        )
+    else:
+        tab = "home"
+        text = (
+            "🦅 <b>CEKREGO CRYPTO TERMINAL</b>\n"
+            "<i>On-Chain Radar • Smart Contract Audit • AI Market Intelligence</i>\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "Selamat datang di <b>CekRego</b> — asisten riset pasar kripto, pemindai token DEX, "
+            "dan auditor keamanan kontrak pintar (Solana &amp; EVM).\n\n"
+            "⚡ <b>Pintasan Instan (Tanpa Perlu Command):</b>\n"
+            "├ 💵 Ketik <code>1 btc</code> atau <code>50rb idr sol</code> untuk konversi harga\n"
+            "├ 🛡️ Paste <b>Contract Address</b> untuk cek DEX + RugCheck otomatis\n"
+            "├ 🧮 Ketik <code>1250 * 16500</code> untuk kalkulator cepat\n"
+            "└ 🕒 Ketik <code>20:00 UTC</code> untuk konversi jam ke WIB\n\n"
+            "👇 <b>Pilih kategori di bawah untuk melihat panduan perintah:</b>"
+        )
+
+    def _lbl(key: str, label: str) -> str:
+        return f"• {label} •" if tab == key else label
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=_lbl("market", "📈 Market & Harga"), callback_data="help_tab:market"),
+            InlineKeyboardButton(text=_lbl("dex", "🛡️ DEX & RugCheck"), callback_data="help_tab:dex"),
+        ],
+        [
+            InlineKeyboardButton(text=_lbl("ai", "🧠 AI & Signals"), callback_data="help_tab:ai"),
+            InlineKeyboardButton(text=_lbl("tools", "🛠️ Tools & Daily"), callback_data="help_tab:tools"),
+        ],
+        [
+            InlineKeyboardButton(text=_lbl("home", "🏠 Beranda"), callback_data="help_tab:home"),
+            InlineKeyboardButton(text=_lbl("all", "📋 Semua Command"), callback_data="help_tab:all"),
+        ],
+        [
+            InlineKeyboardButton(text="📡 Channel @cekrego", url="https://t.me/cekrego"),
+            InlineKeyboardButton(text="⭐ GitHub Repo", url="https://github.com/nialthony/cekrego-crypto-bot"),
+        ]
+    ])
+    return text, kb
+
+
 @router.message(Command("start", "help"))
 async def cmd_start(message: Message):
-    text = (
-        ">*CEKREGO CRYPTO BOT*\n"
-        ">━━━━━━━━━━━━━━━━━━━━━\n"
-        ">*Engine: Aiogram* \\| *AI: OpenRouter \\(NVIDIA Nemotron 3 Ultra\\)*\n"
-        ">━━━━━━━━━━━━━━━━━━━━━\n"
-        ">_Disclaimer: AI Prediction based on Tech\\+Fund data\\. DYOR\\!_\n\n"
-        ">*💡 COMMANDS:*\n"
-        ">• `/p btc` / `/price sol 50` : Cek harga & konversi langsung\n"
-        ">• `/c btc` / `/chart sol 7` : Quick chart viewer \\(1, 7, 30 hari\\)\n"
-        ">• `/calc 100 * 50 / 2` : Kalkulator aritmatika aman\n"
-        ">• `/ai btc` : Prediksi & Generate Signal \\(dengan Risk Score\\)\n"
-        ">• `/signals` / `/x70` : Live Quant Signals & Whale Flow \\(signals\\.x70\\.ai\\)\n"
-        ">• `1 btc` : Cek harga & Statistik\n"
-        ">• `50 doge` : Konversi Crypto ke USD & IDR\n"
-        ">• `50rb idr sol` : Konversi Rupiah ke Crypto\n"
-        ">• `100 usd idr` : Konversi antar fiat\n"
-        ">• `/fiat idr` : Cek kode/simbol fiat\n"
-        ">• `100+50` / `20*5` : Kalkulator\n"
-        ">• `/trend` : Coin Trending di Coingecko\n"
-        ">• `/gnr` / `/lsr` : Top Movers\n"
-        ">• `/market night` : Cek listing CEX & DEX coin\n"
-        ">• `/dex` : DexScreener on\\-chain radar \\+ RugCheck\n"
-        ">• `/rug` : Audit keamanan kontrak, LP lock \\& Top Holders\n"
-        ">• `Paste CA` : Auto\\-detect Solana \\& EVM Contract Address\n"
-        ">• `/graduated` : Sinyal koin lulus Pump\\.fun ➔ Raydium\n"
-        ">• `/liq` / `/liq btc` : Liquidation feed futures \\(realtime collector\\)\n"
-        ">• `/news sol` : Ringkasan news coin \\(AI grounded search\\)\n"
-        ">• `/thesis sol` : Bull/Bear thesis coin \\(AI grounded search\\)\n"
-        ">• `/calendar` / `/calendar 14` : Event market calendar \\(UTC\\+WIB\\)\n"
-        ">• `20:00 UTC` : Auto convert ke WIB\n"
-        ">• `/daily on|off` : Subscribe daily report \\(07:00 & 23:00 UTC\\+7\\)\n"
-        ">• `/adminstats` : Analytics dashboard \\(admin only\\)\n"
-    )
-    await message.answer(text, parse_mode="MarkdownV2")
+    parts = (message.text or "").strip().split(maxsplit=1)
+    initial_tab = "home"
+    if len(parts) > 1:
+        arg = parts[1].strip().lower()
+        if arg in ("market", "price", "harga"):
+            initial_tab = "market"
+        elif arg in ("dex", "rug", "rugcheck", "ca"):
+            initial_tab = "dex"
+        elif arg in ("ai", "signals", "signal", "x70"):
+            initial_tab = "ai"
+        elif arg in ("tools", "util", "daily", "calendar"):
+            initial_tab = "tools"
+        elif arg in ("all", "full", "semua"):
+            initial_tab = "all"
+
+    text, kb = _build_help_view(initial_tab)
+    await message.answer(text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
+
+
+@router.callback_query(F.data.startswith("help_tab:"))
+async def callback_help_tab(call: CallbackQuery):
+    try:
+        tab = call.data.split(":", 1)[1]
+        text, kb = _build_help_view(tab)
+        await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
+        await call.answer()
+    except Exception as e:
+        if "message is not modified" in str(e).lower():
+            await call.answer()
+            return
+        logging.error(f"Help Tab Callback Error: {e}")
+        await call.answer()

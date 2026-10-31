@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, Any, Awaitable
 
 from aiogram import Bot, Dispatcher, BaseMiddleware
-from aiogram.types import Message, TelegramObject
+from aiogram.types import Message, TelegramObject, BotCommand
 
 from config import BOT_TOKEN, ALPHA_CHANNEL
 from bot.handlers import router
@@ -230,6 +230,32 @@ async def main():
 
     # 4. Register Router
     dp.include_router(router)
+
+    # 5. Set Telegram Native Command Menu
+    try:
+        await bot.set_my_commands([
+            BotCommand(command="help", description="🦅 Menu panduan interaktif & daftar fitur"),
+            BotCommand(command="p", description="💵 Cek harga & konversi koin (/p btc, /p 50 sol)"),
+            BotCommand(command="dex", description="🦅 Scan token DEX & likuiditas real-time"),
+            BotCommand(command="rug", description="🛡️ Audit keamanan kontrak & Top Holders"),
+            BotCommand(command="ai", description="🧠 Prediksi teknikal + fundamental AI"),
+            BotCommand(command="signals", description="📡 Live quant signals & whale flow (x70)"),
+            BotCommand(command="c", description="📈 Buat grafik harga koin (/c btc 7)"),
+            BotCommand(command="graduated", description="🎓 Radar koin lulus Pump.fun -> Raydium"),
+            BotCommand(command="liq", description="💥 Stream likuidasi Binance Futures"),
+            BotCommand(command="news", description="📰 Ringkasan berita & sentimen koin"),
+            BotCommand(command="thesis", description="🎯 Analisis Bull/Bear thesis koin"),
+            BotCommand(command="market", description="🏦 Daftar bursa CEX & DEX tempat koin listing"),
+            BotCommand(command="trend", description="🔥 Daftar koin paling trending hari ini"),
+            BotCommand(command="gnr", description="🚀 Top Gainers 24 jam terakhir"),
+            BotCommand(command="lsr", description="📉 Top Losers 24 jam terakhir"),
+            BotCommand(command="calendar", description="🗓️ Jadwal event makro & kripto (UTC/WIB)"),
+            BotCommand(command="ask", description="💬 Tanya jawab interaktif dengan AI"),
+            BotCommand(command="calc", description="🧮 Kalkulator matematika aman"),
+            BotCommand(command="daily", description="⏰ Langganan laporan harian (/daily on|off)"),
+        ])
+    except Exception as e:
+        logging.warning(f"Gagal set bot commands menu: {e}")
 
     logging.info("🚀 Bot started! Siap memantau user...")
 
