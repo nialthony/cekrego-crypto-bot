@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="assets/logo/cekrego-banner-dark.svg" alt="CekRego Crypto Bot" width="100%"/>
+</div>
+
 # 🦅 CekRego Crypto Bot
 
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white)

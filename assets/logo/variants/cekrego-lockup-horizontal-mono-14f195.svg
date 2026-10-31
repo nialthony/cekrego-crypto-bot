@@ -1,0 +1,9 @@
+<svg fill="#14f195" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 256" width="800" height="256" role="img" aria-labelledby="title"><title>CekRego Lockup</title>
+  <title id="title">CekRego — Horizontal Lockup</title>
+  <g id="symbol">
+    <path fill="#14f195" fill-rule="evenodd" d="M 64 20 H 192 L 224 52 V 140 L 128 236 L 32 140 V 52 Z M 60 60 H 156 L 196 100 L 172 124 L 156 108 H 124 L 148 132 H 112 L 76 168 V 92 L 92 76 H 76 Z M 124 76 H 148 L 136 88 H 112 Z"/>
+  </g>
+  <g id="wordmark">
+    <path fill="#14f195" fill-rule="evenodd" d="M 288 88 H 328 V 104 H 288 V 152 H 328 V 168 H 288 L 272 152 V 104 Z M 344 88 H 400 V 104 H 360 V 120 H 392 V 136 H 360 V 152 H 400 V 168 H 344 Z M 416 88 H 432 V 120 L 464 88 H 472 V 100 L 444 128 L 472 156 V 168 H 464 L 432 136 V 168 H 416 Z M 488 88 H 532 L 544 100 V 124 L 532 136 L 544 148 V 168 H 528 V 152 L 512 136 H 504 V 168 H 488 Z M 504 104 V 120 H 528 V 104 Z M 560 88 H 616 V 104 H 576 V 120 H 608 V 136 H 576 V 152 H 616 V 168 H 560 Z M 648 88 H 688 V 104 H 648 V 152 H 672 V 136 H 656 V 120 H 688 V 168 H 648 L 632 152 V 104 Z M 720 88 H 744 L 760 104 V 152 L 744 168 H 720 L 704 152 V 104 Z M 720 104 V 152 H 744 V 104 Z"/>
+  </g>
+</svg>
