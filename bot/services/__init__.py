@@ -31,5 +31,5 @@ from .pump_scanner import (
     pump_graduation_scanner_loop
 )
 from .x70_signals import (
-    get_x70_signals, get_x70_signal_for_coin, get_x70_stats, format_x70_signal_card
+    get_x70_signals, get_x70_signal_for_coin, format_x70_signal_card
 )

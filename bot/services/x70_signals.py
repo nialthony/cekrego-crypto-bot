@@ -1,107 +1,105 @@
 # bot/services/x70_signals.py
-import asyncio
-import logging
 import time
-from typing import Dict, Any, Optional, List
-import aiohttp
-
+import logging
+from typing import Optional, Dict, Any, List
 from config import X70_SIGNALS_API_KEY, X70_SIGNALS_BASE_URL
 from .coingecko import init_session
 
-# Cache signals: {"time": ts, "data": [...]}
-_SIGNALS_CACHE: Dict[str, Dict[str, Any]] = {}
-_SIGNALS_CACHE_TTL = 45  # 45 detik cache agar responsif dan hemat rate limit
+_SIGNALS_CACHE: Dict[str, Any] = {"data": [], "ts": 0}
+_CACHE_TTL = 120  # 2 menit
 
-def _get_headers(api_key: Optional[str] = None) -> Dict[str, str]:
-    key = (api_key or X70_SIGNALS_API_KEY or "").strip()
-    return {
-        "X-Api-Key": key,
-        "Accept": "application/json",
-        "User-Agent": "CekRego-CryptoBot/2.0"
-    }
 
-async def get_x70_signals(
-    coin: Optional[str] = None,
-    limit: int = 10,
-    api_key: Optional[str] = None,
-    force_refresh: bool = False
-) -> List[Dict[str, Any]]:
+async def get_x70_signals(limit: int = 10) -> List[Dict[str, Any]]:
     """
-    Mengambil sinyal quant live dari signals.x70.ai (roman-rr/trading-skills).
-    Mendukung filter coin spesifik (misal 'BTC') dan pagination.
+    Mengambil sinyal quant real-time dari signals.x70.ai (berbasis roman-rr/trading-skills).
+    Menggunakan endpoint /api/signals atau /api/signals/free sebagai fallback.
     """
-    key = (api_key or X70_SIGNALS_API_KEY or "").strip()
-    if not key:
-        return []
-
-    cache_key = f"{coin or 'ALL'}:{limit}"
     now = time.time()
-    if not force_refresh and cache_key in _SIGNALS_CACHE:
-        c = _SIGNALS_CACHE[cache_key]
-        if now - c.get("time", 0) < _SIGNALS_CACHE_TTL:
-            return c.get("data", [])
+    if _SIGNALS_CACHE["data"] and (now - _SIGNALS_CACHE["ts"] < _CACHE_TTL):
+        return _SIGNALS_CACHE["data"][:limit]
 
-    url = f"{X70_SIGNALS_BASE_URL}/api/skill/signals"
-    params = {"limit": str(max(1, min(50, limit)))}
-    if coin:
-        clean_coin = str(coin).strip().upper()
-        if clean_coin.endswith("USDT"):
-            clean_coin = clean_coin[:-4]
-        params["coin"] = clean_coin
+    headers = {"Accept": "application/json", "User-Agent": "CekRegoBot/2.0"}
+    if X70_SIGNALS_API_KEY:
+        headers["Authorization"] = f"Bearer {X70_SIGNALS_API_KEY}"
+        url = f"{X70_SIGNALS_BASE_URL}/api/signals?status=ACTIVE&limit={limit}"
+    else:
+        url = f"{X70_SIGNALS_BASE_URL}/api/signals/free"
 
-    session = await init_session()
     try:
-        async with session.get(url, headers=_get_headers(key), params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                signals = data.get("signals", [])
-                _SIGNALS_CACHE[cache_key] = {"time": now, "data": signals}
-                return signals
+        session = await init_session()
+        async with session.get(url, headers=headers) as resp:
+            if resp.status in (401, 402, 403) and url.endswith("/api/signals"):
+                free_url = f"{X70_SIGNALS_BASE_URL}/api/signals/free"
+                async with session.get(free_url, headers={"Accept": "application/json"}) as resp2:
+                    if resp2.status != 200:
+                        return []
+                    raw = await resp2.json()
+            elif resp.status == 200:
+                raw = await resp.json()
             else:
-                err_txt = await resp.text()
-                logging.warning(f"[X70_SIGNALS] API HTTP {resp.status}: {err_txt[:150]}")
+                logging.warning(f"x70 signals status {resp.status}")
+                return []
+
+            signals = []
+            if isinstance(raw, dict):
+                if "signals" in raw and isinstance(raw["signals"], list):
+                    signals = raw["signals"]
+                elif "signal" in raw and isinstance(raw["signal"], dict):
+                    signals = [raw["signal"]]
+                elif "data" in raw and isinstance(raw["data"], list):
+                    signals = raw["data"]
+            elif isinstance(raw, list):
+                signals = raw
+
+            if signals:
+                _SIGNALS_CACHE["data"] = signals
+                _SIGNALS_CACHE["ts"] = now
+
+            return signals[:limit]
     except Exception as e:
-        logging.error(f"[X70_SIGNALS] Request exception: {e}")
+        logging.error(f"Error fetching x70 signals: {e}")
+        return _SIGNALS_CACHE["data"][:limit] if _SIGNALS_CACHE["data"] else []
 
-    return _SIGNALS_CACHE.get(cache_key, {}).get("data", [])
 
-async def get_x70_signal_for_coin(coin: str, api_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """
-    Mengambil sinyal quant live x70.ai khusus untuk koin tertentu (e.g. 'BTC').
-    """
-    clean_coin = str(coin).strip().upper()
-    if clean_coin.endswith("USDT"):
-        clean_coin = clean_coin[:-4]
-
-    signals = await get_x70_signals(coin=clean_coin, limit=5, api_key=api_key)
-    for s in signals:
-        if str(s.get("coin", "")).upper() == clean_coin:
-            return s
+async def get_x70_signal_for_coin(symbol: str) -> Optional[Dict[str, Any]]:
+    """Cari sinyal x70 yang aktif untuk koin tertentu (misal BTC, ETH, SOL)."""
+    clean_sym = symbol.upper().replace("USDT", "").replace("USD", "").strip()
+    signals = await get_x70_signals(limit=25)
+    for sig in signals:
+        coin = str(sig.get("coin") or sig.get("symbol") or "").upper().replace("USDT", "")
+        if coin == clean_sym:
+            return sig
     return None
 
-async def get_x70_stats(api_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """
-    Mengambil metrik performa & track record dari signals.x70.ai.
-    """
-    key = (api_key or X70_SIGNALS_API_KEY or "").strip()
-    if not key:
-        return None
 
-    url = f"{X70_SIGNALS_BASE_URL}/api/skill/stats"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=_get_headers(key), timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-    except Exception as e:
-        logging.error(f"[X70_SIGNALS] Stats exception: {e}")
-    return None
+def format_x70_signal_text(signal: Dict[str, Any]) -> str:
+    """Format teks ringkas sinyal x70 untuk disuntikkan ke dalam prompt AI."""
+    if not signal:
+        return "Tidak ada sinyal quant x70 aktif untuk koin ini."
+
+    coin = signal.get("coin", "UNKNOWN")
+    direction = signal.get("direction", "NEUTRAL")
+    conf = signal.get("confidence", 0)
+    entry = signal.get("entryPrice", 0)
+    sl = signal.get("stopLoss", 0)
+    tp = signal.get("takeProfit", 0)
+    lev = signal.get("leverage", 1)
+    rrr = signal.get("riskRewardRatio", 0)
+    tags = ", ".join(signal.get("tags") or [])
+    mdata = "; ".join(signal.get("marketData") or [])
+
+    return (
+        f"[X70 QUANT SIGNAL] Coin: {coin} | Direction: {direction} | Confidence: {conf}% | "
+        f"Entry: {entry} | TP: {tp} | SL: {sl} | Recommended Leverage: {lev}x | R/R: {rrr} | "
+        f"Tags: {tags} | Market Microstructure & Whale Flow: {mdata}"
+    )
+
 
 def format_x70_signal_card(signal: Dict[str, Any]) -> str:
-    """Format kartu sinyal x70.ai untuk ditampilkan di chat Telegram."""
+    """Format kartu sinyal x70.ai dengan tampilan bersih dan minimalis."""
     coin = signal.get("coin", "CRYPTO").upper()
     direction = str(signal.get("direction", "NEUTRAL")).upper()
-    dir_badge = "🟢 <b>BULLISH (LONG)</b>" if direction == "BULLISH" else ("🔴 <b>BEARISH (SHORT)</b>" if direction == "BEARISH" else "⚪ <b>NEUTRAL</b>")
+    dir_str = "LONG / BULLISH" if direction == "BULLISH" else ("SHORT / BEARISH" if direction == "BEARISH" else "NEUTRAL")
     conf = signal.get("confidence", 0)
 
     entry = float(signal.get("entryPrice") or 0.0)
@@ -114,10 +112,8 @@ def format_x70_signal_card(signal: Dict[str, Any]) -> str:
     tags_str = ", ".join(f"#{t}" for t in tags[:5]) if tags else "-"
 
     market_data = signal.get("marketData") or []
-    md_lines = []
-    for item in market_data[:3]:
-        md_lines.append(f"• <i>{item}</i>")
-    md_block = "\n".join(md_lines) if md_lines else "• <i>Analisis anomali volume & orderbook aktif</i>"
+    md_lines = [f"- {item}" for item in market_data[:3]]
+    md_block = "\n".join(md_lines) if md_lines else "- Volume & orderbook analysis active"
 
     def _fmt(val):
         if val >= 100:
@@ -127,18 +123,19 @@ def format_x70_signal_card(signal: Dict[str, Any]) -> str:
         return f"${val:,.6f}"
 
     return (
-        f"⚡ <b>[X70 QUANT SIGNAL — TRADING SKILLS]</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🪙 <b>Pair:</b> #{coin}USDT\n"
-        f"🎯 <b>Bias Quant:</b> {dir_badge}\n"
-        f"🧠 <b>Confidence:</b> {conf}% (33 Research Algorithms)\n\n"
-        f"💵 <b>Entry:</b> <code>{_fmt(entry)}</code>\n"
-        f"🎯 <b>Take Profit:</b> <code>{_fmt(tp)}</code>\n"
-        f"🛡️ <b>Stop Loss:</b> <code>{_fmt(sl)}</code>\n"
-        f"⚡ <b>Leverage Rekomendasi:</b> {lev}x (R/R: 1:{rrr:.1f})\n\n"
-        f"📊 <b>Market Microstructure & Whales:</b>\n"
+        f"<pre>"
+        f"QUANT SIGNAL: {coin}USDT\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Bias       : {dir_str}\n"
+        f"Confidence : {conf}%\n"
+        f"Entry      : {_fmt(entry)}\n"
+        f"Take Profit: {_fmt(tp)}\n"
+        f"Stop Loss  : {_fmt(sl)}\n"
+        f"Leverage   : {lev}x (R/R 1:{rrr:.1f})\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Whale &amp; Flow:\n"
         f"{md_block}\n\n"
-        f"🏷️ <b>Tags:</b> <code>{tags_str}</code>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"<i>Sumber: signals.x70.ai (Verified Quantitative MoE Engine)</i>"
+        f"Tags: {tags_str}\n"
+        f"Source: signals.x70.ai"
+        f"</pre>"
     )

@@ -1,0 +1,10 @@
+services:
+  cekrego-bot:
+    build: .
+    container_name: cekrego-crypto-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./bot_data.db:/app/bot_data.db
+

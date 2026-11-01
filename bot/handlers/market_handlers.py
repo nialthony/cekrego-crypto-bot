@@ -9,7 +9,7 @@ from datetime import datetime
 
 from aiogram import Router, F
 from aiogram.types import (
-    Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
+    Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile, InputMediaPhoto
 )
 from aiogram.filters import Command
 
@@ -368,14 +368,14 @@ async def send_price_result(msg_obj: Message, amount: float, symbol: str, coin_i
             f"*Statistik:*\n"
             f"> *Change 24h:* {arrow} `{sign}{fmt_pct_raw(chg_24h)}`\n"
             f"> *Volume:* `${fmt_usd_raw(vol_24h)}`\n"
-            f"> *Market Cap:* `${fmt_usd_raw(mcap)}`\n\n"
-            f"👇 _Klik tombol di bawah untuk chart atau refresh:_"
+            f"> *Market Cap:* `${fmt_usd_raw(mcap)}`"
         )
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📊 1 Hari", callback_data=f"chart:{coin_id}:{symbol}:1"),
-             InlineKeyboardButton(text="📅 7 Hari", callback_data=f"chart:{coin_id}:{symbol}:7")],
-            [InlineKeyboardButton(text="🗓️ 30 Hari", callback_data=f"chart:{coin_id}:{symbol}:30"),
-             InlineKeyboardButton(text="🔄 Refresh", callback_data=f"px_ref:{ref_token}")]
+            [InlineKeyboardButton(text="Chart 1H", callback_data=f"chart:{coin_id}:{symbol}:1h"),
+             InlineKeyboardButton(text="Chart 1D", callback_data=f"chart:{coin_id}:{symbol}:1"),
+             InlineKeyboardButton(text="Chart 7D", callback_data=f"chart:{coin_id}:{symbol}:7")],
+            [InlineKeyboardButton(text="AI Signal", callback_data=f"ai_run:{coin_id}"),
+             InlineKeyboardButton(text="Refresh", callback_data=f"px_ref:{ref_token}")]
         ])
         await msg_obj.edit_text(text, parse_mode="MarkdownV2", reply_markup=kb)
         return
@@ -390,7 +390,8 @@ async def send_price_result(msg_obj: Message, amount: float, symbol: str, coin_i
         f"```"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔄 Refresh", callback_data=f"px_ref:{ref_token}")]
+        [InlineKeyboardButton(text="AI Signal", callback_data=f"ai_run:{coin_id}"),
+         InlineKeyboardButton(text="Refresh", callback_data=f"px_ref:{ref_token}")]
     ])
     await msg_obj.edit_text(text, parse_mode="MarkdownV2", reply_markup=kb)
 
@@ -466,18 +467,51 @@ async def cmd_price(message: Message):
         logging.error(f"Cmd Price Error: {e}")
         await msg_wait.edit_text(f"❌ Error: `{escape_md(str(e))}`", parse_mode="MarkdownV2")
 
+def _build_chart_kb(coin_id: str, symbol: str, active_tf: str = "1") -> InlineKeyboardMarkup:
+    tf_norm = str(active_tf).lower().strip()
+    if tf_norm == "1d":
+        tf_norm = "1"
+    elif tf_norm == "7d":
+        tf_norm = "7"
+    elif tf_norm == "30d":
+        tf_norm = "30"
+
+    def _btn(label: str, tf_val: str):
+        text = f"• {label} •" if tf_norm == tf_val else label
+        return InlineKeyboardButton(text=text, callback_data=f"chart:{coin_id}:{symbol}:{tf_val}")
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("15m", "15m"), _btn("1H", "1h"), _btn("4H", "4h")],
+        [_btn("1D", "1"), _btn("7D", "7"), _btn("30D", "30")],
+    ])
+
+def _format_tf_caption(symbol: str, tf: str) -> str:
+    tf_map = {
+        "15m": "15m",
+        "1h": "1H",
+        "4h": "4H",
+        "1": "1D",
+        "1d": "1D",
+        "7": "7D",
+        "7d": "7D",
+        "30": "30D",
+        "30d": "30D",
+    }
+    tf_label = tf_map.get(str(tf).lower(), str(tf).upper())
+    return f"*{escape_md(symbol.upper())} / USD \\({escape_md(tf_label)}\\)*\n_Indicators: EMA 20/50, Volume, RSI\\(14\\)_"
+
 @router.message(Command("c", "chart"))
 async def cmd_chart(message: Message):
     content = (message.text or "").strip()
     parts = content.split()
     if len(parts) < 2:
-        await message.reply("`Usage: /c <symbol> [1|7|30]`\n_Contoh: `/c btc` atau `/c sol 7`_", parse_mode="MarkdownV2")
+        await message.reply("`Usage: /c <symbol> [15m|1h|4h|1d|7d|30d]`\n_Contoh: `/c btc` atau `/c sol 4h`_", parse_mode="MarkdownV2")
         return
     
     symbol = parts[1].lower()
     days = "1"
-    if len(parts) >= 3 and parts[2] in ("1", "7", "30"):
-        days = parts[2]
+    if len(parts) >= 3 and parts[2].lower() in ("15m", "1h", "4h", "1", "1d", "7", "7d", "30", "30d"):
+        days = parts[2].lower()
 
     msg_wait = await message.reply("📈 _Membuat chart\\.\\.\\._", parse_mode="MarkdownV2")
     try:
@@ -494,11 +528,13 @@ async def cmd_chart(message: Message):
 
         buf = await services.generate_chart(coin_id, symbol, days)
         if buf:
-            caption = f"📈 *Chart {escape_md(symbol.upper())} \\- {escape_md(days)} Hari*\n_Source: CoinGecko_"
+            caption = _format_tf_caption(symbol, days)
+            kb = _build_chart_kb(coin_id, symbol, days)
             await message.reply_photo(
                 BufferedInputFile(buf.getvalue(), filename=f"{symbol}.png"),
                 caption=caption,
-                parse_mode="MarkdownV2"
+                parse_mode="MarkdownV2",
+                reply_markup=kb
             )
             await msg_wait.delete()
         else:
@@ -624,21 +660,32 @@ async def callback_price_select(call: CallbackQuery):
 async def callback_chart(call: CallbackQuery):
     try:
         _, coin_id, symbol, days = call.data.split(":")
-        await call.answer("Sedang membuat chart...")
+        await call.answer(f"Loading chart ({days.upper()})...")
         await call.message.bot.send_chat_action(call.message.chat.id, "upload_photo")
 
         buf = await services.generate_chart(coin_id, symbol, days)
 
         if buf:
-            caption = f"📈 *Chart {escape_md(symbol.upper())} \\- {escape_md(days)} Hari*\n_Source: CoinGecko_"
-            await call.message.answer_photo(
-                BufferedInputFile(buf.getvalue(), filename=f"{symbol}.png"),
-                caption=caption,
-                parse_mode="MarkdownV2"
-            )
+            caption = _format_tf_caption(symbol, days)
+            kb = _build_chart_kb(coin_id, symbol, days)
+            photo_file = BufferedInputFile(buf.getvalue(), filename=f"{symbol}_{days}.png")
+            if call.message.photo:
+                await call.message.edit_media(
+                    media=InputMediaPhoto(media=photo_file, caption=caption, parse_mode="MarkdownV2"),
+                    reply_markup=kb
+                )
+            else:
+                await call.message.answer_photo(
+                    photo_file,
+                    caption=caption,
+                    parse_mode="MarkdownV2",
+                    reply_markup=kb
+                )
         else:
             await call.message.reply("❌ Gagal membuat chart\\.", parse_mode="MarkdownV2")
     except Exception as e:
+        if "message is not modified" in str(e).lower():
+            return
         await call.message.reply(f"Error: {e}")
 
 # --- 2.1 CALLBACK REFRESH HARGA COIN ---
@@ -687,14 +734,14 @@ async def callback_price_refresh(call: CallbackQuery):
                 f"> *Change 24h:* {arrow} `{sign}{fmt_pct_raw(chg_24h)}`\n"
                 f"> *Volume:* `${fmt_usd_raw(vol_24h)}`\n"
                 f"> *Market Cap:* `${fmt_usd_raw(mcap)}`\n\n"
-                f"🕒 _Update: {now_wib} WIB_\n"
-                f"👇 _Klik tombol di bawah untuk chart atau refresh:_"
+                f"_Update: {now_wib} WIB_"
             )
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📊 1 Hari", callback_data=f"chart:{coin_id}:{symbol}:1"),
-                 InlineKeyboardButton(text="📅 7 Hari", callback_data=f"chart:{coin_id}:{symbol}:7")],
-                [InlineKeyboardButton(text="🗓️ 30 Hari", callback_data=f"chart:{coin_id}:{symbol}:30"),
-                 InlineKeyboardButton(text="🔄 Refresh", callback_data=f"px_ref:{ref_token}")],
+                [InlineKeyboardButton(text="Chart 1H", callback_data=f"chart:{coin_id}:{symbol}:1h"),
+                 InlineKeyboardButton(text="Chart 1D", callback_data=f"chart:{coin_id}:{symbol}:1"),
+                 InlineKeyboardButton(text="Chart 7D", callback_data=f"chart:{coin_id}:{symbol}:7")],
+                [InlineKeyboardButton(text="AI Signal", callback_data=f"ai_run:{coin_id}"),
+                 InlineKeyboardButton(text="Refresh", callback_data=f"px_ref:{ref_token}")],
             ])
             await call.message.edit_text(text, parse_mode="MarkdownV2", reply_markup=kb)
         else:
@@ -710,15 +757,16 @@ async def callback_price_refresh(call: CallbackQuery):
                 f"```"
             )
             kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔄 Refresh", callback_data=f"px_ref:{ref_token}")]
+                [InlineKeyboardButton(text="AI Signal", callback_data=f"ai_run:{coin_id}"),
+                 InlineKeyboardButton(text="Refresh", callback_data=f"px_ref:{ref_token}")]
             ])
             await call.message.edit_text(text, parse_mode="MarkdownV2", reply_markup=kb)
 
         item["time"] = time.time()
-        await call.answer("⚡ Harga berhasil di-refresh!")
+        await call.answer("Harga berhasil di-refresh.")
     except Exception as e:
         if "message is not modified" in str(e).lower():
-            await call.answer("⚡ Harga sudah yang paling update!")
+            await call.answer("Harga sudah yang paling update.")
             return
         logging.error(f"Price Refresh Error: {e}")
         await call.answer("Gagal me-refresh harga.")
@@ -731,27 +779,21 @@ async def cmd_trending(message: Message):
         await message.reply(f"⏳ Tunggu {remain} detik dulu ya 😄", parse_mode=None)
         return
 
-    msg = await message.reply("🌏 _Mencari coin yang lagi rame\\.\\.\\._", parse_mode="MarkdownV2")
+    msg = await message.reply("_Mencari coin yang sedang trending\\.\\.\\._", parse_mode="MarkdownV2")
     try:
         data = await services.get_trending()
         if not data:
             await msg.edit_text("⚠️ Data kosong\\.", parse_mode="MarkdownV2")
             return
-        lines = ["🔥 *TOP 10 TRENDING SEARCH*", ""]
+        lines = ["*TOP 10 TRENDING SEARCH*", ""]
         for i, item in enumerate(data[:10], 1):
             c = item['item']
             name = escape_md(c.get('name'))
             sym = escape_md(c.get('symbol'))
             rank = c.get('market_cap_rank')
-            rank_str = f"Rank: {rank}" if rank else "Rank: \\-"
-            lines.append(f">{i} *{name}* \\(`{sym}`\\) \\| _{rank_str}_")
-        lines.append("")
-        lines.append("⏳ _Wait for it\\.\\.\\._")
-        final_text = "\n".join(lines)
-        await msg.edit_text(final_text, parse_mode="MarkdownV2")
-        await asyncio.sleep(2)
-        final_text_celebrate = final_text.replace("⏳ _Wait for it\\.\\.\\._", "🎉 *Ikan hiu makan tomat, Alopyupuuul\\!* 🚀")
-        await msg.edit_text(final_text_celebrate, parse_mode="MarkdownV2")
+            rank_str = f"Rank: #{rank}" if rank else "Rank: \\-"
+            lines.append(f">{i}\\. *{name}* \\(`{sym}`\\) \\| _{rank_str}_")
+        await msg.edit_text("\n".join(lines), parse_mode="MarkdownV2")
     except Exception as e:
         await msg.edit_text(f"Error: `{escape_md(str(e))}`", parse_mode="MarkdownV2")
 
@@ -846,7 +888,7 @@ async def handle_idr_conversion(message: Message):
 async def cmd_fiat_helper(message: Message):
     limited, remain = is_rate_limited(message.from_user.id, "fiat")
     if limited:
-        await message.reply(f"⏳ Tunggu {remain} detik dulu ya :)", parse_mode=None)
+        await message.reply(f"Tunggu {remain} detik dulu ya :)", parse_mode=None)
         return
 
     content = message.text or message.caption or ""
@@ -857,59 +899,59 @@ async def cmd_fiat_helper(message: Message):
     if query:
         parsed_conv = parse_fiat_conversion_text(query)
         if parsed_conv:
-            msg = await message.reply("💱 <i>Menghitung konversi kurs fiat...</i>", parse_mode="HTML")
+            msg = await message.reply("<i>Menghitung konversi kurs fiat...</i>", parse_mode="HTML")
             data = await services.convert_fiat(parsed_conv["amount"], parsed_conv["base"], parsed_conv["quote"])
             if not data:
-                await msg.edit_text("❌ Gagal mengambil kurs fiat saat ini.", parse_mode="HTML")
+                await msg.edit_text("Gagal mengambil kurs fiat saat ini.", parse_mode="HTML")
                 return
             result = data.get("result", 0) or 0
             rate = data.get("rate", 0) or 0
             base = data.get("base")
             quote = data.get("quote")
             text = (
-                f"💱 <b>KONVERSI MATA UANG FIAT</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━\n"
-                f"💵 <b>Input :</b> <code>{fmt_amount_raw(parsed_conv['amount'])} {base}</code>\n"
-                f"🎯 <b>Hasil :</b> <code>{fmt_amount_raw(result)} {quote}</code>\n"
-                f"📊 <b>Kurs  :</b> <code>1 {base} = {fmt_usd_raw(rate)} {quote}</code>\n"
+                f"<pre>"
+                f"KONVERSI FIAT: {base} -&gt; {quote}\n\n"
+                f"Input : {fmt_amount_raw(parsed_conv['amount'])} {base}\n"
+                f"Hasil : {fmt_amount_raw(result)} {quote}\n"
+                f"Kurs  : 1 {base} = {fmt_usd_raw(rate)} {quote}"
+                f"</pre>"
             )
             await msg.edit_text(text, parse_mode="HTML")
             return
 
     currencies = await services.get_fiat_currencies()
     if not currencies:
-        await message.reply("❌ Gagal mengambil daftar mata uang fiat saat ini.", parse_mode=None)
+        await message.reply("Gagal mengambil daftar mata uang fiat saat ini.", parse_mode=None)
         return
 
     if not query:
         common_map = {item.get("code"): item for item in currencies if isinstance(item, dict)}
         lines = [
-            "💱 <b>FIAT &amp; KURS MATA UANG DUNIA</b>",
-            "━━━━━━━━━━━━━━━━━━━━━",
-            "<b>Cara Penggunaan:</b>",
-            "• <code>/fiat idr</code> atau <code>/fiat usd</code> — Cek detail &amp; kurs live",
-            "• <code>/fiat yen</code> atau <code>/fiat riyal</code> — Cari kode mata uang",
-            "• <code>100 usd idr</code> — Konversi langsung antar fiat di chat",
-            "• <code>50rb idr jpy</code> — Konversi Rupiah ke mata uang asing",
+            "FIAT & KURS MATA UANG DUNIA",
+            "----------------------------------------",
+            "Cara Penggunaan:",
+            "  /fiat idr        Cek detail & kurs live",
+            "  /fiat yen        Cari kode mata uang",
+            "  100 usd idr      Konversi langsung di chat",
+            "  50rb idr jpy     Konversi Rupiah ke fiat asing",
             "",
-            f"🌍 <b>Total Didukung:</b> <code>{len(currencies)}</code> mata uang dunia",
+            f"Total Didukung: {len(currencies)} mata uang",
             "",
-            "<b>Kode Populer:</b>",
+            "Kode Populer:",
         ]
         for code in COMMON_FIAT_CODES:
             item = common_map.get(code)
             if not item:
                 continue
-            flag = item.get("flag") or "💱"
-            symbol = f" ({html.escape(item.get('symbol'))})" if item.get("symbol") else ""
-            lines.append(f"├ {flag} <code>{code}</code> — {html.escape(item.get('name', ''))}{symbol}")
-        await message.reply("\n".join(lines), parse_mode="HTML")
+            symbol = f" ({item.get('symbol')})" if item.get("symbol") else ""
+            lines.append(f"  {code:<4} : {item.get('name', '')}{symbol}")
+        await message.reply(f"<pre>{html.escape(chr(10).join(lines))}</pre>", parse_mode="HTML")
         return
 
     matches = await services.search_fiat_currencies(query, limit=12)
     if not matches:
         await message.reply(
-            f"⚠️ Mata uang <code>{html.escape(query)}</code> tidak ditemukan.\n"
+            f"Mata uang <code>{html.escape(query)}</code> tidak ditemukan.\n"
             f"Coba contoh: <code>/fiat idr</code>, <code>/fiat usd</code>, atau <code>/fiat yen</code>",
             parse_mode="HTML"
         )
@@ -926,18 +968,24 @@ async def cmd_fiat_helper(message: Message):
     )
     if exact:
         code = exact.get("code", "")
-        flag = exact.get("flag") or "💱"
-        symbol = f" ({html.escape(exact.get('symbol'))})" if exact.get("symbol") else ""
-        numeric = f"\n├ <b>ISO Numeric:</b> <code>{exact.get('numeric')}</code>" if exact.get("numeric") else ""
+        symbol = f" ({exact.get('symbol')})" if exact.get("symbol") else ""
+        lines = [
+            f"FIAT CURRENCY: {code}",
+            "----------------------------------------",
+            f"Kode ISO : {code}",
+            f"Nama     : {exact.get('name', '')}{symbol}",
+        ]
+        if exact.get("numeric"):
+            lines.append(f"Numeric  : {exact.get('numeric')}")
 
         # Ambil live kurs terhadap mata uang utama
         rate_lines = []
         if code == "IDR":
-            benchmarks = [("USD", "🇺🇸"), ("SGD", "🇸🇬"), ("EUR", "🇪🇺"), ("MYR", "🇲🇾"), ("JPY", "🇯🇵"), ("SAR", "🇸🇦")]
-            rates = await asyncio.gather(*(services.get_fiat_rate(b, "IDR") for b, _ in benchmarks), return_exceptions=True)
-            for (b_code, b_flag), r_val in zip(benchmarks, rates):
+            benchmarks = ["USD", "SGD", "EUR", "MYR", "JPY", "SAR"]
+            rates = await asyncio.gather(*(services.get_fiat_rate(b, "IDR") for b in benchmarks), return_exceptions=True)
+            for b_code, r_val in zip(benchmarks, rates):
                 if isinstance(r_val, (int, float)) and r_val > 0:
-                    rate_lines.append(f"├ {b_flag} <code>1 {b_code}</code> = <code>Rp{fmt_idr_raw(r_val)}</code>")
+                    rate_lines.append(f"  1 {b_code:<3} = Rp{fmt_idr_raw(r_val)}")
         else:
             r_to_idr, r_from_usd = await asyncio.gather(
                 services.get_fiat_rate(code, "IDR"),
@@ -945,33 +993,26 @@ async def cmd_fiat_helper(message: Message):
                 return_exceptions=True
             )
             if isinstance(r_to_idr, (int, float)) and r_to_idr > 0:
-                rate_lines.append(f"├ 🇮🇩 <code>1 {code}</code> = <code>Rp{fmt_idr_raw(r_to_idr)} IDR</code>")
+                rate_lines.append(f"  1 {code:<3} = Rp{fmt_idr_raw(r_to_idr)} IDR")
             if code != "USD" and isinstance(r_from_usd, (int, float)) and r_from_usd > 0:
-                rate_lines.append(f"├ 🇺🇸 <code>1 USD</code> = <code>{fmt_usd_raw(r_from_usd)} {code}</code>")
+                rate_lines.append(f"  1 USD = {fmt_usd_raw(r_from_usd)} {code}")
 
-        rate_block = ""
         if rate_lines:
-            rate_block = "\n\n📊 <b>Kurs Real-Time Saat Ini:</b>\n" + "\n".join(rate_lines)
+            lines.append("")
+            lines.append("Kurs Real-Time:")
+            lines.extend(rate_lines)
 
-        text = (
-            f"{flag} <b>FIAT CURRENCY DETAIL</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"├ <b>Kode ISO:</b> <code>{code}</code>\n"
-            f"├ <b>Nama:</b> {html.escape(exact.get('name', ''))}{symbol}"
-            f"{numeric}"
-            f"{rate_block}\n\n"
-            f"💡 <i>Ketik <code>100 {code.lower()} idr</code> untuk konversi cepat!</i>"
-        )
-        await message.reply(text, parse_mode="HTML")
+        pre_block = f"<pre>{html.escape(chr(10).join(lines))}</pre>"
+        footer = f"\n<i>Ketik <code>100 {code.lower()} idr</code> untuk konversi cepat.</i>"
+        await message.reply(pre_block + footer, parse_mode="HTML")
         return
 
-    lines = [f"🔍 <b>Hasil pencarian fiat untuk '{html.escape(query)}':</b>", ""]
+    lines = [f"HASIL PENCARIAN FIAT: {query.upper()}", "----------------------------------------"]
     for item in matches[:10]:
-        flag = item.get("flag") or "💱"
-        symbol = f" ({html.escape(item.get('symbol'))})" if item.get("symbol") else ""
-        lines.append(f"• {flag} <code>{item.get('code')}</code> — {html.escape(item.get('name', ''))}{symbol}")
-    lines.append("\n<i>Ketik <code>/fiat [kode]</code> untuk melihat kurs live.</i>")
-    await message.reply("\n".join(lines), parse_mode="HTML")
+        symbol = f" ({item.get('symbol')})" if item.get("symbol") else ""
+        lines.append(f"{item.get('code', ''):<4} : {item.get('name', '')}{symbol}")
+    pre_block = f"<pre>{html.escape(chr(10).join(lines))}</pre>"
+    await message.reply(pre_block + "\n<i>Ketik <code>/fiat [kode]</code> untuk melihat kurs live.</i>", parse_mode="HTML")
 
 
 @router.message(F.text.regexp(r"^\s*(\d+(?:\.\d+)?)\s*(rb|jt)?\s+[a-zA-Z]{3}\s+(?:to\s+)?[a-zA-Z]{3}\s*$"))
@@ -990,20 +1031,21 @@ async def handle_fiat_to_fiat_conversion(message: Message):
         if base not in valid_codes or quote not in valid_codes:
             return
 
-        msg = await message.reply("💱 <i>Mengecek kurs fiat...</i>", parse_mode="HTML")
+        msg = await message.reply("<i>Mengecek kurs fiat...</i>", parse_mode="HTML")
         data = await services.convert_fiat(amount, base, quote)
         if not data:
-            await msg.edit_text("❌ Gagal mengambil kurs fiat saat ini.", parse_mode="HTML")
+            await msg.edit_text("Gagal mengambil kurs fiat saat ini.", parse_mode="HTML")
             return
 
         result = data.get("result", 0) or 0
         rate = data.get("rate", 0) or 0
 
         text = (
-            f"💱 <b>KONVERSI MATA UANG FIAT</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"💵 <b>{fmt_amount_raw(amount)} {base}</b> = <b>{fmt_amount_raw(result)} {quote}</b>\n"
-            f"📊 <b>Kurs:</b> <code>1 {base} = {fmt_usd_raw(rate)} {quote}</code>"
+            f"<pre>"
+            f"KONVERSI FIAT: {base} -&gt; {quote}\n\n"
+            f"{fmt_amount_raw(amount)} {base} = {fmt_amount_raw(result)} {quote}\n"
+            f"Kurs: 1 {base} = {fmt_usd_raw(rate)} {quote}"
+            f"</pre>"
         )
         await msg.edit_text(text, parse_mode="HTML")
     except Exception as e:
@@ -1207,27 +1249,26 @@ def _format_pct_html(val):
     except:
         return "0.00%"
     sign = "+" if n > 0 else ""
-    icon = "🟢" if n > 0 else "🔴" if n < 0 else "⚪"
-    return f"{icon} {sign}{n:.2f}%"
+    return f"{sign}{n:.2f}%"
 
 CHAIN_BADGES = {
-    "solana": ("🪐 SOLANA", "Solana"),
-    "base": ("🔵 BASE", "Base"),
-    "ethereum": ("🦄 ETHEREUM", "Ethereum"),
-    "bsc": ("🟡 BNB CHAIN", "BNB Chain"),
-    "arbitrum": ("🔷 ARBITRUM", "Arbitrum"),
-    "polygon": ("💜 POLYGON", "Polygon"),
-    "avalanche": ("🔺 AVALANCHE", "Avalanche"),
-    "sui": ("💧 SUI", "Sui"),
-    "tron": ("🔴 TRON", "Tron"),
-    "optimism": ("🔴 OPTIMISM", "Optimism"),
-    "blast": ("💥 BLAST", "Blast"),
-    "fantom": ("👻 FANTOM", "Fantom"),
+    "solana": ("SOLANA", "Solana"),
+    "base": ("BASE", "Base"),
+    "ethereum": ("ETHEREUM", "Ethereum"),
+    "bsc": ("BNB CHAIN", "BNB Chain"),
+    "arbitrum": ("ARBITRUM", "Arbitrum"),
+    "polygon": ("POLYGON", "Polygon"),
+    "avalanche": ("AVALANCHE", "Avalanche"),
+    "sui": ("SUI", "Sui"),
+    "tron": ("TRON", "Tron"),
+    "optimism": ("OPTIMISM", "Optimism"),
+    "blast": ("BLAST", "Blast"),
+    "fantom": ("FANTOM", "Fantom"),
 }
 
 def _get_chain_badge(chain_id):
     c = str(chain_id or "").lower()
-    return CHAIN_BADGES.get(c, (f"⛓️ {c.upper()}", c.title()))
+    return CHAIN_BADGES.get(c, (c.upper(), c.title()))
 
 def _build_dex_card(pair: dict, other_pairs=None, security: dict = None):
     chain_id = str(pair.get("chainId") or "unknown").lower()
@@ -1249,9 +1290,9 @@ def _build_dex_card(pair: dict, other_pairs=None, security: dict = None):
 
     base = pair.get("baseToken") or {}
     quote = pair.get("quoteToken") or {}
-    token_name = html.escape(str(base.get("name") or "Unknown"))
-    token_symbol = html.escape(str(base.get("symbol") or "?").upper())
-    quote_symbol = html.escape(str(quote.get("symbol") or "?").upper())
+    token_name = str(base.get("name") or "Unknown")
+    token_symbol = str(base.get("symbol") or "?").upper()
+    quote_symbol = str(quote.get("symbol") or "?").upper()
     ca = str(base.get("address") or "-")
     pair_addr = str(pair.get("pairAddress") or "")
 
@@ -1279,61 +1320,56 @@ def _build_dex_card(pair: dict, other_pairs=None, security: dict = None):
     if total_tx > 0:
         buy_pct = (buys / total_tx) * 100
         if buy_pct >= 60:
-            flow_label = f"🟢 Bullish ({buy_pct:.0f}% Buys)"
+            flow_label = f"Bullish ({buy_pct:.0f}% Buys)"
         elif buy_pct <= 40:
-            flow_label = f"🔴 Bearish ({100 - buy_pct:.0f}% Sells)"
+            flow_label = f"Bearish ({100 - buy_pct:.0f}% Sells)"
         else:
-            flow_label = f"🟡 Balanced ({buy_pct:.0f}% Buys)"
+            flow_label = f"Balanced ({buy_pct:.0f}% Buys)"
     else:
-        flow_label = "⚪ No Data"
+        flow_label = "No Data"
 
     # Smart Risk Warnings
     warnings = []
     if liq_usd < 10000:
-        warnings.append("⚠️ <b>LOW LIQUIDITY (&lt;$10K):</b> Risiko slippage ekstrem / rawan rug pull!")
+        warnings.append("Note: Low Liquidity (<$10K) - risiko slippage / rug tinggi.")
     elif liq_usd < 35000:
-        warnings.append("⚠️ <b>MODERATE LIQUIDITY:</b> Likuiditas terbatas, waspada fluktuasi tajam.")
+        warnings.append("Note: Moderate Liquidity - likuiditas terbatas.")
 
     if total_tx >= 20:
         if sells > (buys * 2.5):
-            warnings.append("🚨 <b>DUMP ALERT:</b> Tekanan jual masif mendominasi transaksi!")
+            warnings.append("Alert: Tekanan jual mendominasi transaksi.")
         elif buys > (sells * 2.5):
-            warnings.append("🚀 <b>MOMENTUM ALERT:</b> Akumulasi beli sangat kuat!")
+            warnings.append("Alert: Akumulasi beli kuat.")
 
     if float(mcap) > 0 and (liq_usd / float(mcap)) < 0.02 and liq_usd > 0:
-        warnings.append("⚠️ <b>LOW LIQ RATIO (&lt;2% MC):</b> Likuiditas tipis dibanding Market Cap.")
+        warnings.append("Note: Rasio likuiditas tipis (<2% dari Market Cap).")
 
-    warning_block = ""
+    lines = [
+        f"DEX RADAR: {token_name} ({token_symbol}/{quote_symbol})",
+        f"Chain     : {chain_badge} | {dex_name}",
+        "----------------------------------------",
+        f"Price     : {price_str}",
+        f"MCap/FDV  : {_format_dex_compact(mcap)} / {_format_dex_compact(fdv)}",
+        f"Liquidity : {_format_dex_compact(liq_usd)} | Age: {age_str}",
+        "",
+        f"Change    : 5m {c_5m} | 1h {c_1h} | 6h {c_6h} | 24h {c_24h}",
+        f"Volume 24h: {vol_24h} ({buys:,} Buys / {sells:,} Sells)",
+        f"Orderflow : {flow_label}",
+    ]
+
     if warnings:
-        warning_block = "\n" + "\n".join(warnings) + "\n"
+        lines.append("")
+        lines.extend(warnings)
 
+    pre_main = f"<pre>{html.escape(chr(10).join(lines))}</pre>"
     security_block = ""
     if security:
         security_block = "\n" + services.format_security_block_compact(security)
 
     text = (
-        f"<b>{chain_badge} | {dex_name}</b>\n"
-        f"<b>💎 {token_name} (${token_symbol})</b>\n"
-        f"<i>Pair: ${token_symbol} / ${quote_symbol}</i>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💵 <b>Price:</b> <code>{price_str}</code>\n"
-        f"💎 <b>Market Cap:</b> <code>{_format_dex_compact(mcap)}</code> | <b>FDV:</b> <code>{_format_dex_compact(fdv)}</code>\n"
-        f"💧 <b>Liquidity:</b> <code>{_format_dex_compact(liq_usd)}</code>\n"
-        f"⏳ <b>Age:</b> <code>{age_str}</code>\n\n"
-        f"📊 <b>PRICE CHANGE:</b>\n"
-        f"├ 5m  : {c_5m}\n"
-        f"├ 1h  : {c_1h}\n"
-        f"├ 6h  : {c_6h}\n"
-        f"└ 24h : {c_24h}\n\n"
-        f"⚡ <b>TRANSACTIONS (24h):</b>\n"
-        f"├ Volume : <code>{vol_24h}</code>\n"
-        f"├ Buys   : <code>{buys:,}</code>\n"
-        f"├ Sells  : <code>{sells:,}</code>\n"
-        f"└ Flow   : {flow_label}\n"
-        f"{security_block}"
-        f"{warning_block}\n"
-        f"📝 <b>Contract Address (Tap to copy):</b>\n"
-        f"<code>{ca}</code>"
+        f"{pre_main}"
+        f"{security_block}\n"
+        f"<b>CA:</b> <code>{html.escape(ca)}</code>"
     )
 
     # Store token in refresh cache
@@ -1352,19 +1388,19 @@ def _build_dex_card(pair: dict, other_pairs=None, security: dict = None):
     # Row 1: DexScreener + Direct Trade Link
     row1 = []
     dex_url = pair.get("url") or f"https://dexscreener.com/{chain_id}/{pair_addr}"
-    row1.append(InlineKeyboardButton(text="🦅 DexScreener", url=dex_url))
+    row1.append(InlineKeyboardButton(text="DexScreener", url=dex_url))
 
     if chain_id == "solana":
-        row1.append(InlineKeyboardButton(text="⚡ Photon", url=f"https://photon-sol.tinyastro.io/en/r/@cekrego/{ca}"))
-        row1.append(InlineKeyboardButton(text="🐂 BullX", url=f"https://bullx.io/terminal?chainId=1399811149&address={ca}"))
+        row1.append(InlineKeyboardButton(text="Photon", url=f"https://photon-sol.tinyastro.io/en/r/@cekrego/{ca}"))
+        row1.append(InlineKeyboardButton(text="BullX", url=f"https://bullx.io/terminal?chainId=1399811149&address={ca}"))
     elif chain_id == "base":
-        row1.append(InlineKeyboardButton(text="🦄 Uniswap", url=f"https://app.uniswap.org/swap?outputCurrency={ca}&chain=base"))
+        row1.append(InlineKeyboardButton(text="Uniswap", url=f"https://app.uniswap.org/swap?outputCurrency={ca}&chain=base"))
     elif chain_id == "ethereum":
-        row1.append(InlineKeyboardButton(text="🦄 Uniswap", url=f"https://app.uniswap.org/swap?outputCurrency={ca}&chain=mainnet"))
+        row1.append(InlineKeyboardButton(text="Uniswap", url=f"https://app.uniswap.org/swap?outputCurrency={ca}&chain=mainnet"))
     elif chain_id == "bsc":
-        row1.append(InlineKeyboardButton(text="🥞 Pancake", url=f"https://pancakeswap.finance/swap?outputCurrency={ca}&chain=bsc"))
+        row1.append(InlineKeyboardButton(text="PancakeSwap", url=f"https://pancakeswap.finance/swap?outputCurrency={ca}&chain=bsc"))
     else:
-        row1.append(InlineKeyboardButton(text="🔄 Swap", url=dex_url))
+        row1.append(InlineKeyboardButton(text="Swap", url=dex_url))
     keyboard.append(row1)
 
     # Row 2: Socials (Twitter/X, Telegram)
@@ -1376,15 +1412,15 @@ def _build_dex_card(pair: dict, other_pairs=None, security: dict = None):
         if not surl:
             continue
         if stype == "twitter" and len(social_row) < 2:
-            social_row.append(InlineKeyboardButton(text="🐦 Twitter/X", url=surl))
+            social_row.append(InlineKeyboardButton(text="Twitter/X", url=surl))
         elif stype == "telegram" and len(social_row) < 3:
-            social_row.append(InlineKeyboardButton(text="💬 Telegram", url=surl))
+            social_row.append(InlineKeyboardButton(text="Telegram", url=surl))
 
     websites = (pair.get("info") or {}).get("websites") or []
     if websites and len(social_row) < 3:
         wurl = websites[0].get("url")
         if wurl:
-            social_row.append(InlineKeyboardButton(text="🌐 Web", url=wurl))
+            social_row.append(InlineKeyboardButton(text="Website", url=wurl))
 
     if social_row:
         keyboard.append(social_row)
@@ -1421,8 +1457,8 @@ def _build_dex_card(pair: dict, other_pairs=None, security: dict = None):
     # Row 4: RugCheck Detail + Refresh Button
     row4 = []
     if chain_id == "solana" or chain_id in ("ethereum", "bsc", "base", "arbitrum", "polygon", "optimism", "avalanche", "blast"):
-        row4.append(InlineKeyboardButton(text="🛡️ RugCheck Audit", callback_data=f"dex_rug:{ref_token}"))
-    row4.append(InlineKeyboardButton(text="🔄 Refresh Data", callback_data=f"dex_ref:{ref_token}"))
+        row4.append(InlineKeyboardButton(text="RugCheck Audit", callback_data=f"dex_rug:{ref_token}"))
+    row4.append(InlineKeyboardButton(text="Refresh", callback_data=f"dex_ref:{ref_token}"))
     keyboard.append(row4)
 
     return text, InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -1481,48 +1517,48 @@ async def _process_dex_query(message_or_call, query: str, is_ca: bool = False, e
 async def cmd_dex_radar(message: Message):
     limited, remain = is_rate_limited(message.from_user.id, "dex")
     if limited:
-        await message.reply(f"⏳ Tunggu {remain} detik dulu ya 😄", parse_mode=None)
+        await message.reply(f"Tunggu {remain} detik dulu ya :)", parse_mode=None)
         return
 
     content = message.text or message.caption or ""
     parts = content.split(maxsplit=1)
     if len(parts) < 2:
         await message.reply(
-            "🦅 <b>DexScreener On-Chain Radar + RugCheck</b>\n\n"
+            "<b>DexScreener On-Chain Radar + RugCheck</b>\n\n"
             "Cek harga, likuiditas, distribusi holder & audit keamanan kontrak DEX/Meme realtime.\n\n"
             "<b>Cara Penggunaan:</b>\n"
             "• <code>/dex [simbol / nama]</code> : Contoh <code>/dex pepe</code> atau <code>/dex bonk</code>\n"
             "• <code>/dex [contract address]</code> : Contoh <code>/dex DezXAZ...</code>\n"
             "• <code>/rug [CA / simbol]</code> : Audit detail RugCheck & Top Holders\n"
-            "• <b>Atau langsung paste CA</b> di chat tanpa command!\n",
+            "• Atau langsung paste Contract Address di chat tanpa command.",
             parse_mode="HTML"
         )
         return
 
     query = parts[1].strip()
     msg_wait = await message.reply(
-        f"🔍 <i>Scanning DexScreener & RugCheck for <code>{html.escape(query)}</code>...</i>",
+        f"<i>Scanning DexScreener & RugCheck for <code>{html.escape(query)}</code>...</i>",
         parse_mode="HTML"
     )
     try:
         await _process_dex_query(message, query, edit_message_obj=msg_wait)
     except Exception as e:
         logging.error(f"Dex Cmd Error: {e}")
-        await msg_wait.edit_text("❌ Gagal memproses data DexScreener.", parse_mode="HTML")
+        await msg_wait.edit_text("Gagal memproses data DexScreener.", parse_mode="HTML")
 
 # Command /rug, /rugcheck, /scan, /audit
 @router.message(Command("rug", "rugcheck", "scan", "audit"))
 async def cmd_rugcheck_audit(message: Message):
     limited, remain = is_rate_limited(message.from_user.id, "rug")
     if limited:
-        await message.reply(f"⏳ Tunggu {remain} detik dulu ya 😄", parse_mode=None)
+        await message.reply(f"Tunggu {remain} detik dulu ya :)", parse_mode=None)
         return
 
     content = message.text or message.caption or ""
     parts = content.split(maxsplit=1)
     if len(parts) < 2:
         await message.reply(
-            "🛡️ <b>On-Chain Contract & RugCheck Scanner</b>\n\n"
+            "<b>On-Chain Contract & RugCheck Scanner</b>\n\n"
             "Audit keamanan smart contract, LP lock, Mint/Freeze authority, Honeypot, dan distribusi Top Holders (Non-LP).\n\n"
             "<b>Cara Penggunaan:</b>\n"
             "• <code>/rug &lt;contract_address&gt;</code>\n"
@@ -1533,7 +1569,7 @@ async def cmd_rugcheck_audit(message: Message):
 
     query = parts[1].strip()
     msg_wait = await message.reply(
-        f"🛡️ <i>Running on-chain security audit for <code>{html.escape(query)}</code>...</i>",
+        f"<i>Running on-chain security audit for <code>{html.escape(query)}</code>...</i>",
         parse_mode="HTML"
     )
     try:
@@ -1558,7 +1594,7 @@ async def cmd_rugcheck_audit(message: Message):
         else:
             pairs = await services.search_dex_pairs(query)
             if not pairs:
-                await msg_wait.edit_text(f"❌ Token <code>{html.escape(query)}</code> tidak ditemukan.", parse_mode="HTML")
+                await msg_wait.edit_text(f"Token <code>{html.escape(query)}</code> tidak ditemukan.", parse_mode="HTML")
                 return
             pair = pairs[0]
             chain_id = str(pair.get("chainId") or "solana").lower()
@@ -1567,7 +1603,7 @@ async def cmd_rugcheck_audit(message: Message):
         sec = await services.get_token_security(chain_id, ca, force_refresh=True)
         if not sec:
             await msg_wait.edit_text(
-                f"⚠️ Data audit keamanan belum tersedia untuk kontrak <code>{html.escape(ca)}</code> di chain <b>{html.escape(chain_id.upper())}</b>.",
+                f"Data audit keamanan belum tersedia untuk kontrak <code>{html.escape(ca)}</code> di chain <b>{html.escape(chain_id.upper())}</b>.",
                 parse_mode="HTML"
             )
             return
@@ -1584,11 +1620,11 @@ async def cmd_rugcheck_audit(message: Message):
                 "time": time.time()
             }
             kb_rows.append([
-                InlineKeyboardButton(text="📊 Lihat DEX Card", callback_data=f"dex_ref:{ref_token}"),
-                InlineKeyboardButton(text="🔄 Refresh Audit", callback_data=f"dex_rug:{ref_token}")
+                InlineKeyboardButton(text="DEX Card", callback_data=f"dex_ref:{ref_token}"),
+                InlineKeyboardButton(text="Refresh Audit", callback_data=f"dex_rug:{ref_token}")
             ])
         if sec.get("url"):
-            kb_rows.append([InlineKeyboardButton(text=f"🌐 Buka di {sec.get('source', 'Scanner')}", url=sec["url"])])
+            kb_rows.append([InlineKeyboardButton(text=f"Buka di {sec.get('source', 'Scanner')}", url=sec["url"])])
 
         await msg_wait.edit_text(
             audit_text,
@@ -1598,26 +1634,26 @@ async def cmd_rugcheck_audit(message: Message):
         )
     except Exception as e:
         logging.error(f"RugCheck Cmd Error: {e}")
-        await msg_wait.edit_text("❌ Gagal mengambil laporan audit kontrak.", parse_mode="HTML")
+        await msg_wait.edit_text("Gagal mengambil laporan audit kontrak.", parse_mode="HTML")
 
 # Auto-detect Contract Address directly pasted in chat
 @router.message(F.text.func(_is_contract_address))
 async def handle_auto_ca_detect(message: Message):
     limited, remain = is_rate_limited(message.from_user.id, "dex")
     if limited:
-        await message.reply(f"⏳ Tunggu {remain} detik dulu ya 😄", parse_mode=None)
+        await message.reply(f"Tunggu {remain} detik dulu ya :)", parse_mode=None)
         return
 
     ca = (message.text or "").strip()
     msg_wait = await message.reply(
-        f"🦅 <i>Contract Address terdeteksi! Mengambil data on-chain & RugCheck...</i>",
+        f"<i>Contract Address terdeteksi. Mengambil data on-chain & RugCheck...</i>",
         parse_mode="HTML"
     )
     try:
         await _process_dex_query(message, ca, is_ca=True, edit_message_obj=msg_wait)
     except Exception as e:
         logging.error(f"Auto CA Detect Error: {e}")
-        await msg_wait.edit_text("❌ Gagal memproses Contract Address.", parse_mode="HTML")
+        await msg_wait.edit_text("Gagal memproses Contract Address.", parse_mode="HTML")
 
 # Callback RugCheck Detail Button
 @router.callback_query(F.data.startswith("dex_rug:"))
@@ -1629,7 +1665,7 @@ async def callback_dex_rugcheck(call: CallbackQuery):
             await call.answer("Sesi sudah expired. Gunakan /rug atau /dex ulang.", show_alert=True)
             return
 
-        await call.answer("🛡️ Mengambil audit keamanan kontrak...")
+        await call.answer("Mengambil audit keamanan kontrak...")
         chain_id = item.get("chain") or "solana"
         pair_addr = item.get("pair") or ""
         ca = item.get("ca") or ""
@@ -1642,18 +1678,18 @@ async def callback_dex_rugcheck(call: CallbackQuery):
         if isinstance(pair_data, Exception):
             pair_data = None
         if isinstance(sec, Exception) or not sec:
-            await call.answer("⚠️ Laporan audit belum tersedia untuk token ini.", show_alert=True)
+            await call.answer("Laporan audit belum tersedia untuk token ini.", show_alert=True)
             return
 
         audit_text = services.format_full_rugcheck_card(sec, pair=pair_data)
         kb_rows = [
             [
                 InlineKeyboardButton(text="« Kembali ke DEX Card", callback_data=f"dex_ref:{ref_token}"),
-                InlineKeyboardButton(text="🔄 Refresh Audit", callback_data=f"dex_rug:{ref_token}")
+                InlineKeyboardButton(text="Refresh Audit", callback_data=f"dex_rug:{ref_token}")
             ]
         ]
         if sec.get("url"):
-            kb_rows.append([InlineKeyboardButton(text=f"🌐 Buka di {sec.get('source', 'Scanner')}", url=sec["url"])])
+            kb_rows.append([InlineKeyboardButton(text=f"Buka di {sec.get('source', 'Scanner')}", url=sec["url"])])
 
         await call.message.edit_text(
             audit_text,
@@ -1744,15 +1780,19 @@ async def callback_dex_switch_pair(call: CallbackQuery):
 async def cmd_graduated_tokens(message: Message):
     limited, remain = is_rate_limited(message.from_user.id, "graduated")
     if limited:
-        await message.reply(f"⏳ Tunggu {remain} detik dulu ya 😄", parse_mode=None)
+        await message.reply(f"Tunggu {remain} detik dulu ya :)", parse_mode=None)
         return
 
     recent = services.get_recent_graduated_tokens(limit=5)
     if not recent:
         await message.reply(
-            "🎓 <b>Pump.fun ➔ Raydium Graduation Radar</b>\n\n"
-            "<i>Belum ada token baru yang lulus sejak bot restart.</i>\n\n"
-            "Scanner sedang aktif memantau stream realtime 24/7 dan otomatis mengirimkan sinyal beserta audit RugCheck ke channel <b>@cekrego</b>! ⚡",
+            "<pre>"
+            "PUMP.FUN -&gt; RAYDIUM GRADUATION RADAR\n"
+            "----------------------------------------\n"
+            "Status : Active (24/7 WebSocket Stream)\n"
+            "Recent : Belum ada token baru sejak restart.\n"
+            "</pre>\n"
+            "<i>Sinyal kelulusan otomatis dikirim ke channel @cekrego beserta audit RugCheck.</i>",
             parse_mode="HTML"
         )
         return
@@ -1831,138 +1871,118 @@ async def cmd_add(message: Message):
     await database.add_preferred_id(parts[1], parts[2])
     await message.reply(f"✅ Saved `{escape_md(parts[1])}` ➔ `{escape_md(parts[2])}`", parse_mode="MarkdownV2")
 
-# --- START/HELP INTERACTIVE MENU ---
+# --- START/HELP INTERACTIVE MENU (CLEAN & MINIMAL STYLE) ---
 def _build_help_view(tab: str = "home") -> tuple[str, InlineKeyboardMarkup]:
     tab = (tab or "home").lower().strip()
 
     if tab == "market":
         text = (
-            "📈 <b>MARKET DATA, HARGA &amp; CHART</b>\n"
-            "<i>Data harga global real-time, grafik visual &amp; likuidasi futures</i>\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "🔹 <b>Cek Harga &amp; Konversi Cepat</b>\n"
-            "├ <code>/p &lt;koin&gt;</code> — Cek harga &amp; statistik koin\n"
-            "├ <code>/p &lt;jumlah&gt; &lt;koin&gt;</code> — Konversi koin ke USD &amp; IDR\n"
-            "└ <i>Contoh:</i> <code>/p btc</code> atau <code>/p 50 sol</code>\n\n"
-            "🔹 <b>Trigger Chat Otomatis (Tanpa Command)</b>\n"
-            "├ <code>1 btc</code> / <code>50 doge</code> — Cek harga langsung di chat\n"
-            "├ <code>50rb idr sol</code> — Konversi Rupiah ke jumlah koin\n"
-            "└ <code>100 usd idr</code> — Konversi nilai antar mata uang fiat\n\n"
-            "🔹 <b>Chart &amp; Eksplorasi Bursa</b>\n"
-            "├ <code>/c &lt;koin&gt; [1|7|30]</code> — Grafik harga (1, 7, atau 30 hari)\n"
-            "├ <code>/market &lt;koin&gt;</code> — Daftar bursa CEX &amp; DEX beserta volume\n"
-            "├ <code>/trend</code> — Top koin paling trending di CoinGecko\n"
-            "├ <code>/gnr</code> &amp; <code>/lsr</code> — Top Gainers &amp; Top Losers (24 Jam)\n"
-            "└ <code>/liq [koin]</code> — Stream likuidasi posisi Long/Short Binance"
+            "<b>MARKET DATA, HARGA &amp; CHART</b>\n"
+            "<pre>"
+            "Cek Harga &amp; Konversi:\n"
+            "  /p &lt;koin&gt;            Harga &amp; statistik koin\n"
+            "  /p &lt;jml&gt; &lt;koin&gt;      Konversi koin ke USD &amp; IDR\n"
+            "  1 btc / 50 doge      Trigger langsung di chat\n"
+            "  50rb idr sol         Konversi Rupiah ke koin\n"
+            "  100 usd idr          Konversi antar mata uang fiat\n\n"
+            "Chart &amp; Eksplorasi Bursa:\n"
+            "  /c &lt;koin&gt; [tf]       Chart (15m, 1h, 4h, 1d, 7d, 30d)\n"
+            "  /market &lt;koin&gt;       Daftar CEX &amp; DEX + volume\n"
+            "  /trend               Top 10 trending CoinGecko\n"
+            "  /gnr | /lsr          Top Gainers &amp; Losers 24h\n"
+            "  /liq [koin]          Stream likuidasi Binance Futures"
+            "</pre>"
         )
     elif tab == "dex":
         text = (
-            "🛡️ <b>ON-CHAIN DEX RADAR &amp; RUGCHECK</b>\n"
-            "<i>Pemindaian token DEX real-time &amp; audit keamanan kontrak pintar</i>\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "🔹 <b>DexScreener On-Chain Radar</b>\n"
-            "├ <code>/dex &lt;simbol / nama&gt;</code> — Cari pair DEX berdasarkan nama\n"
-            "├ <code>/dex &lt;contract_address&gt;</code> — Cek detail token via CA\n"
-            "└ <i>Contoh:</i> <code>/dex bonk</code> atau <code>/dex pepe</code>\n\n"
-            "🔹 <b>Smart Contract &amp; RugCheck Scanner</b>\n"
-            "├ <code>/rug &lt;CA / simbol&gt;</code> — Audit keamanan kontrak mendalam\n"
-            "├ <b>Solana (RugCheck.xyz):</b> Risk Score, Mint/Freeze Authority,\n"
-            "│  LP Locked %, Insider Networks &amp; Top 10 Holders (Non-LP)\n"
-            "└ <b>EVM (GoPlus Security):</b> Honeypot check, Verified Source,\n"
-            "   Buy/Sell Tax, Ownership Renounced &amp; Top Holders\n\n"
-            "🔹 <b>Auto-Detect &amp; Pump.fun Graduation Radar</b>\n"
-            "├ <b>Paste CA Langsung:</b> Kirim alamat kontrak Solana/EVM di chat\n"
-            "│  tanpa command untuk membuka kartu DEX + RugCheck otomatis\n"
-            "└ <code>/graduated</code> (<code>/alpha</code>) — Radar koin baru lulus Pump.fun ➔ Raydium"
+            "<b>ON-CHAIN DEX RADAR &amp; RUGCHECK</b>\n"
+            "<pre>"
+            "DexScreener Radar:\n"
+            "  /dex &lt;simbol/nama&gt;   Cari pair DEX (misal: /dex bonk)\n"
+            "  /dex &lt;CA&gt;            Cek detail token via Contract Address\n"
+            "  Paste CA langsung    Auto-detect Solana &amp; EVM di chat\n\n"
+            "Smart Contract Security Scanner:\n"
+            "  /rug &lt;CA / simbol&gt;   Audit keamanan kontrak &amp; Top Holders\n"
+            "  - Solana (RugCheck)  Risk Score, Mint/Freeze, LP Lock,\n"
+            "                       Insider Network &amp; Top 10 Holders\n"
+            "  - EVM (GoPlus)       Honeypot, Tax, Verified, Owner\n\n"
+            "Alpha Scanner:\n"
+            "  /graduated           Token baru lulus Pump.fun -&gt; Raydium"
+            "</pre>"
         )
     elif tab == "ai":
         text = (
-            "🧠 <b>AI INTELLIGENCE &amp; QUANT SIGNALS</b>\n"
-            "<i>Analisis teknikal, fundamental &amp; sinyal kuantitatif real-time</i>\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "🔹 <b>AI Trading Signal &amp; Technical Setup</b>\n"
-            "├ <code>/ai &lt;koin&gt;</code> — Analisis indikator TA (RSI, MACD, EMA, BB, ATR)\n"
-            "│  + sentimen berita untuk menghasilkan setup LONG/SHORT/WAIT,\n"
-            "│  level Entry, Take Profit, Stop Loss &amp; Risk Score\n"
-            "└ <i>Contoh:</i> <code>/ai btc</code> atau <code>/ai sol</code>\n\n"
-            "🔹 <b>Live Quant Signals (signals.x70.ai)</b>\n"
-            "├ <code>/signals</code> (<code>/x70</code>) — Daftar sinyal quant yang sedang aktif\n"
-            "└ <code>/signals &lt;koin&gt;</code> — Cek Whale Flow &amp; Orderbook koin tertentu\n\n"
-            "🔹 <b>Riset Fundamental &amp; Diskusi AI</b>\n"
-            "├ <code>/news &lt;koin&gt;</code> — Ringkasan berita terbaru &amp; sentimen pasar\n"
-            "├ <code>/thesis &lt;koin&gt;</code> — Analisis Bull/Bear case &amp; katalis utama\n"
-            "└ <code>/ask &lt;pertanyaan&gt;</code> — Tanya jawab AI (bisa di-<i>reply</i> berlanjut)"
+            "<b>AI INTELLIGENCE &amp; QUANT SIGNALS</b>\n"
+            "<pre>"
+            "AI Market Sniper:\n"
+            "  /ai &lt;koin&gt;           Analisa TA (RSI, MACD, EMA, BB, ATR)\n"
+            "                       + berita -&gt; Entry, TP, SL &amp; Risk Score\n\n"
+            "Live Quant Signals (signals.x70.ai):\n"
+            "  /signals             Daftar sinyal quant yang sedang aktif\n"
+            "  /signals &lt;koin&gt;      Whale flow &amp; orderbook koin tertentu\n\n"
+            "Riset Fundamental &amp; Diskusi:\n"
+            "  /news &lt;koin&gt;         Ringkasan berita &amp; sentimen pasar\n"
+            "  /thesis &lt;koin&gt;       Bull/Bear case &amp; katalis utama\n"
+            "  /ask &lt;pertanyaan&gt;    Tanya jawab AI (bisa reply berlanjut)"
+            "</pre>"
         )
     elif tab == "tools":
         text = (
-            "🛠️ <b>UTILITAS, KALENDER &amp; LAPORAN HARIAN</b>\n"
-            "<i>Alat bantu trading harian, jadwal makro &amp; otomatisasi</i>\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "🔹 <b>Kalender Makro &amp; Event Kripto</b>\n"
-            "├ <code>/calendar</code> — Jadwal event penting 7 hari ke depan\n"
-            "└ <code>/calendar &lt;hari&gt;</code> — Rentang khusus (1–30 hari, UTC &amp; WIB)\n\n"
-            "🔹 <b>Kalkulator, Kurs Fiat &amp; Zona Waktu</b>\n"
-            "├ <code>/calc &lt;ekspresi&gt;</code> — Kalkulator aman (atau ketik <code>100*25/2</code>)\n"
-            "├ <code>/fiat &lt;kode&gt;</code> — Cek kurs &amp; info mata uang fiat (<code>/fiat idr</code>)\n"
-            "└ <code>20:00 UTC</code> — Ketik jam UTC di chat untuk auto-konversi ke WIB\n\n"
-            "🔹 <b>Laporan Harian &amp; Sistem</b>\n"
-            "├ <code>/daily on</code> | <code>/daily off</code> — Langganan laporan pasar otomatis\n"
-            "│  setiap pukul 07:00 &amp; 23:00 WIB\n"
-            "└ <code>/adminstats</code> — Dashboard analitik penggunaan bot <i>(Admin)</i>"
+            "<b>UTILITAS, KALENDER &amp; LAPORAN HARIAN</b>\n"
+            "<pre>"
+            "Kalender &amp; Event:\n"
+            "  /calendar            Jadwal event penting 7 hari ke depan\n"
+            "  /calendar &lt;hari&gt;     Rentang khusus (1-30 hari, UTC &amp; WIB)\n\n"
+            "Kalkulator, Kurs Fiat &amp; Waktu:\n"
+            "  /calc &lt;ekspresi&gt;     Kalkulator (atau ketik 100*25/2)\n"
+            "  /fiat &lt;kode&gt;         Cek kurs live &amp; kode mata uang dunia\n"
+            "  20:00 UTC            Auto-convert jam UTC ke WIB di chat\n\n"
+            "Laporan Otomatis:\n"
+            "  /daily on | off      Laporan harian (07:00 &amp; 23:00 WIB)"
+            "</pre>"
         )
     elif tab == "all":
         text = (
-            "📋 <b>DAFTAR LENGKAP COMMAND CEKREGO</b>\n"
-            "<i>Klik pada bagian di bawah untuk membuka/melipat rincian</i>\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "<b>📈 Market, Harga &amp; Chart</b>\n"
-            "<blockquote expandable>"
-            "• <code>/p &lt;jml&gt; &lt;koin&gt;</code> : Cek harga &amp; konversi\n"
-            "• <code>1 btc</code> / <code>50rb idr sol</code> : Trigger konversi cepat\n"
-            "• <code>/c &lt;koin&gt; [1|7|30]</code> : Grafik harga visual\n"
-            "• <code>/market &lt;koin&gt;</code> : Daftar listing CEX &amp; DEX\n"
-            "• <code>/trend</code> : Koin trending di CoinGecko\n"
-            "• <code>/gnr</code> | <code>/lsr</code> : Top Gainers &amp; Top Losers 24h\n"
-            "• <code>/liq [koin]</code> : Realtime liquidation feed"
-            "</blockquote>\n\n"
-            "<b>🛡️ On-Chain DEX &amp; RugCheck</b>\n"
-            "<blockquote expandable>"
-            "• <code>/dex &lt;koin / CA&gt;</code> : Kartu DexScreener + RugCheck\n"
-            "• <code>/rug &lt;CA / koin&gt;</code> : Audit keamanan kontrak &amp; Top Holders\n"
-            "• <code>Paste CA</code> : Auto-detect kontrak Solana &amp; EVM\n"
-            "• <code>/graduated</code> : Radar token lulus Pump.fun ➔ Raydium"
-            "</blockquote>\n\n"
-            "<b>🧠 AI &amp; Quant Signals</b>\n"
-            "<blockquote expandable>"
-            "• <code>/ai &lt;koin&gt;</code> : Prediksi sinyal TA + Fundamental\n"
-            "• <code>/signals [koin]</code> : Live quant signals (signals.x70.ai)\n"
-            "• <code>/news &lt;koin&gt;</code> : Ringkasan berita &amp; sentimen koin\n"
-            "• <code>/thesis &lt;koin&gt;</code> : Bull &amp; Bear thesis koin\n"
-            "• <code>/ask &lt;pertanyaan&gt;</code> : Tanya jawab AI interaktif"
-            "</blockquote>\n\n"
-            "<b>🛠️ Utilitas &amp; Laporan</b>\n"
-            "<blockquote expandable>"
-            "• <code>/calendar [hari]</code> : Kalender event makro &amp; kripto\n"
-            "• <code>/calc &lt;ekspresi&gt;</code> : Kalkulator matematika aman\n"
-            "• <code>/fiat &lt;kode&gt;</code> : Info mata uang fiat\n"
-            "• <code>20:00 UTC</code> : Auto-convert jam UTC ke WIB\n"
-            "• <code>/daily on|off</code> : Laporan harian (07:00 &amp; 23:00 WIB)"
-            "</blockquote>"
+            "<b>DAFTAR LENGKAP COMMAND CEKREGO</b>\n"
+            "<pre>"
+            "MARKET &amp; CHART\n"
+            "  /p &lt;jml&gt; &lt;koin&gt;      Harga &amp; konversi koin\n"
+            "  1 btc | 50rb idr sol Pintasan konversi di chat\n"
+            "  /c &lt;koin&gt; [tf]       Chart (15m, 1h, 4h, 1d, 7d, 30d)\n"
+            "  /market &lt;koin&gt;       Listing bursa CEX &amp; DEX\n"
+            "  /trend | /gnr | /lsr Trending, Gainers &amp; Losers\n"
+            "  /liq [koin]          Realtime liquidation feed\n\n"
+            "ON-CHAIN DEX &amp; RUGCHECK\n"
+            "  /dex &lt;koin / CA&gt;     Kartu DexScreener + RugCheck\n"
+            "  /rug &lt;CA / koin&gt;     Audit smart contract &amp; Top Holders\n"
+            "  /graduated           Radar token lulus Pump.fun\n\n"
+            "AI &amp; QUANT SIGNALS\n"
+            "  /ai &lt;koin&gt;           Setup sinyal TA + Fundamental\n"
+            "  /signals [koin]      Live quant signals (x70)\n"
+            "  /news | /thesis      Berita &amp; Bull/Bear thesis\n"
+            "  /ask &lt;pertanyaan&gt;    Tanya jawab AI interaktif\n\n"
+            "TOOLS &amp; DAILY\n"
+            "  /calendar [hari]     Kalender event kripto\n"
+            "  /fiat [kode]         Kurs mata uang fiat dunia\n"
+            "  /calc &lt;ekspresi&gt;     Kalkulator matematika\n"
+            "  /daily on | off      Laporan pasar otomatis"
+            "</pre>"
         )
     else:
         tab = "home"
         text = (
-            "🦅 <b>CEKREGO CRYPTO TERMINAL</b>\n"
-            "<i>On-Chain Radar • Smart Contract Audit • AI Market Intelligence</i>\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n"
-            "Selamat datang di <b>CekRego</b> — asisten riset pasar kripto, pemindai token DEX, "
-            "dan auditor keamanan kontrak pintar (Solana &amp; EVM).\n\n"
-            "⚡ <b>Pintasan Instan (Tanpa Perlu Command):</b>\n"
-            "├ 💵 Ketik <code>1 btc</code> atau <code>50rb idr sol</code> untuk konversi harga\n"
-            "├ 🛡️ Paste <b>Contract Address</b> untuk cek DEX + RugCheck otomatis\n"
-            "├ 🧮 Ketik <code>1250 * 16500</code> untuk kalkulator cepat\n"
-            "└ 🕒 Ketik <code>20:00 UTC</code> untuk konversi jam ke WIB\n\n"
-            "👇 <b>Pilih kategori di bawah untuk melihat panduan perintah:</b>"
+            "<b>CEKREGO CRYPTO BOT</b>\n"
+            "<i>Market Data • On-Chain DEX Radar • Contract Audit • AI Signals</i>\n\n"
+            "<pre>"
+            "Pintasan Cepat (Tanpa Command):\n"
+            "  1 btc / 50 doge      Cek harga &amp; konversi instan\n"
+            "  50rb idr sol         Konversi Rupiah ke koin\n"
+            "  100 usd idr          Konversi kurs mata uang fiat\n"
+            "  Paste CA             Auto-scan DEX + RugCheck\n"
+            "  1250 * 16500         Kalkulator otomatis\n"
+            "  20:00 UTC            Konversi waktu ke WIB"
+            "</pre>\n"
+            "<i>Pilih kategori di bawah untuk melihat daftar perintah:</i>"
         )
 
     def _lbl(key: str, label: str) -> str:
@@ -1970,20 +1990,20 @@ def _build_help_view(tab: str = "home") -> tuple[str, InlineKeyboardMarkup]:
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text=_lbl("market", "📈 Market & Harga"), callback_data="help_tab:market"),
-            InlineKeyboardButton(text=_lbl("dex", "🛡️ DEX & RugCheck"), callback_data="help_tab:dex"),
+            InlineKeyboardButton(text=_lbl("market", "Market & Chart"), callback_data="help_tab:market"),
+            InlineKeyboardButton(text=_lbl("dex", "DEX & RugCheck"), callback_data="help_tab:dex"),
         ],
         [
-            InlineKeyboardButton(text=_lbl("ai", "🧠 AI & Signals"), callback_data="help_tab:ai"),
-            InlineKeyboardButton(text=_lbl("tools", "🛠️ Tools & Daily"), callback_data="help_tab:tools"),
+            InlineKeyboardButton(text=_lbl("ai", "AI & Signals"), callback_data="help_tab:ai"),
+            InlineKeyboardButton(text=_lbl("tools", "Tools & Fiat"), callback_data="help_tab:tools"),
         ],
         [
-            InlineKeyboardButton(text=_lbl("home", "🏠 Beranda"), callback_data="help_tab:home"),
-            InlineKeyboardButton(text=_lbl("all", "📋 Semua Command"), callback_data="help_tab:all"),
+            InlineKeyboardButton(text=_lbl("home", "Home"), callback_data="help_tab:home"),
+            InlineKeyboardButton(text=_lbl("all", "All Commands"), callback_data="help_tab:all"),
         ],
         [
-            InlineKeyboardButton(text="📡 Channel @cekrego", url="https://t.me/cekrego"),
-            InlineKeyboardButton(text="⭐ GitHub Repo", url="https://github.com/nialthony/cekrego-crypto-bot"),
+            InlineKeyboardButton(text="Channel @cekrego", url="https://t.me/cekrego"),
+            InlineKeyboardButton(text="GitHub", url="https://github.com/nialthony/cekrego-crypto-bot"),
         ]
     ])
     return text, kb

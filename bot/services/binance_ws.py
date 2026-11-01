@@ -1,11 +1,11 @@
 # bot/services/binance_ws.py
+import ssl
 import json
 import time
 import asyncio
 import logging
 import aiohttp
 from collections import deque
-from datetime import datetime, timezone
 
 from config import BINANCE_LIQ_WS_URL, LIQUIDATION_SYMBOLS
 
@@ -17,6 +17,24 @@ LIQUIDATION_WS_CONNECTED = False
 LIQUIDATION_BUFFER = deque(maxlen=300)
 LIQUIDATION_FEED_RUNNING = False
 _last_ws_msg_time = 0
+
+WS_ENDPOINTS = [
+    BINANCE_LIQ_WS_URL or "wss://fstream.binance.com/ws/!forceOrder@arr",
+    "wss://fstream.binance.com/ws/!forceOrder@arr",
+]
+
+
+def _build_ssl_context(verify: bool = True):
+    if not verify:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
 
 
 def _normalize_liq_event(raw):
@@ -51,9 +69,6 @@ def _normalize_liq_event(raw):
     if not symbol or qty <= 0:
         return None
 
-    # Binance force order side semantics:
-    # SELL liquidation usually closes a long position -> LONG liq
-    # BUY liquidation usually closes a short position -> SHORT liq
     liq_side = "LONG" if side == "SELL" else "SHORT" if side == "BUY" else side
 
     return {
@@ -66,20 +81,25 @@ def _normalize_liq_event(raw):
         "timestamp": event_ts,
     }
 
+
 async def liquidation_ws_loop():
     global LIQUIDATION_LAST_WS_TS, LIQUIDATION_WS_CONNECTED
-    ws_url = "wss://fstream.binance.com/ws/!forceOrder@arr"
+    verify_ssl = True
+    endpoint_idx = 0
 
     while True:
         local_session = False
         session = None
+        ws_url = WS_ENDPOINTS[endpoint_idx % len(WS_ENDPOINTS)]
+        ssl_ctx = _build_ssl_context(verify=verify_ssl)
+
         try:
             session = http_session
-            if session is None:
+            if session is None or session.closed:
                 session = aiohttp.ClientSession()
                 local_session = True
 
-            async with session.ws_connect(ws_url, heartbeat=30, autoping=True) as ws:
+            async with session.ws_connect(ws_url, heartbeat=30, autoping=True, ssl=ssl_ctx) as ws:
                 LIQUIDATION_WS_CONNECTED = True
                 logging.info("🟢 Binance liquidation WS connected")
 
@@ -109,7 +129,13 @@ async def liquidation_ws_loop():
             raise
         except Exception as e:
             LIQUIDATION_WS_CONNECTED = False
-            logging.warning(f"[LIQ_WS] reconnecting after error: {e}")
+            err_str = str(e)
+            if "CERTIFICATE_VERIFY_FAILED" in err_str and verify_ssl:
+                logging.info("[LIQ_WS] Local CA store missing issuer cert; switching to tolerant SSL context for public liquidation stream.")
+                verify_ssl = False
+            else:
+                endpoint_idx += 1
+                logging.warning(f"[LIQ_WS] reconnecting after error: {e}")
         finally:
             if local_session and session is not None:
                 try:
@@ -117,7 +143,8 @@ async def liquidation_ws_loop():
                 except Exception:
                     pass
 
-        await asyncio.sleep(5)
+        await asyncio.sleep(3)
+
 
 async def get_recent_liquidations(limit=50, max_age_sec=3600, symbols=None):
     symbols_set = {str(s).upper() for s in (symbols or []) if s}
@@ -136,11 +163,10 @@ async def get_recent_liquidations(limit=50, max_age_sec=3600, symbols=None):
             break
     return out
 
+
 def get_liquidation_feed_status():
     return {
         "connected": LIQUIDATION_WS_CONNECTED,
         "last_ws_ts": LIQUIDATION_LAST_WS_TS,
         "buffer_size": len(LIQUIDATION_EVENTS),
     }
-
-# --- CORE API FUNCTIONS ---

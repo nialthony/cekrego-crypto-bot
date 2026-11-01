@@ -1,0 +1,36 @@
+name: CI — Syntax & Unit Checks
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint-and-verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile all Python files (Syntax & Warning Check)
+        run: |
+          python -W error -m compileall -q main.py config.py bot
+
+      - name: Verify module imports and formatters
+        env:
+          TELEGRAM_TOKEN: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+        run: |
+          python -c "import bot.utils, bot.services, bot.handlers; print('All modules imported successfully!')"

@@ -43,3 +43,4 @@ The **CekRego** mark combines a chamfered hexagonal **Security Shield** (represe
 - **Minimum Size:**
   - Standard symbol: `24px` height.
   - Small-size cut (`cekrego-symbol-small.svg`): `16px` height.
+

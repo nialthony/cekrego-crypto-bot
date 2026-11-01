@@ -18,111 +18,103 @@ SEEN_GRADUATION_MINTS = deque(maxlen=500)
 _pump_scanner_running = False
 
 
-def build_graduation_signal_card(pair: dict, raw_event: dict = None, security: dict = None):
-    """Membangun card sinyal sniping untuk token yang baru listing di Raydium dengan data RugCheck."""
+def build_graduation_signal_card(pair: dict, raw_event: dict = None, security: dict = None) -> tuple[str, InlineKeyboardMarkup]:
+    """
+    Format kartu sinyal kelulusan Pump.fun -> Raydium dengan gaya minimalis & bersih.
+    """
     base = pair.get("baseToken") or {}
     quote = pair.get("quoteToken") or {}
-    name = html.escape(str(base.get("name") or "Unknown"))
-    symbol = html.escape(str(base.get("symbol") or "?").upper())
-    quote_sym = html.escape(str(quote.get("symbol") or "SOL").upper())
-    ca = str(base.get("address") or "")
+    name = html.escape(base.get("name") or "Unknown")
+    symbol = html.escape((base.get("symbol") or "???").upper())
+    quote_sym = html.escape((quote.get("symbol") or "SOL").upper())
+    ca = html.escape(base.get("address") or "")
 
-    price_usd = float(pair.get("priceUsd") or 0)
-    mcap = float(pair.get("marketCap") or pair.get("fdv") or 0)
-    liq_usd = float((pair.get("liquidity") or {}).get("usd") or 0)
+    price_usd = float(pair.get("priceUsd") or 0.0)
+    mcap = float(pair.get("marketCap") or pair.get("fdv") or 0.0)
+    liq_usd = float((pair.get("liquidity") or {}).get("usd") or 0.0)
 
-    # Format price
-    if price_usd >= 1:
-        p_str = f"${price_usd:,.3f}"
-    elif price_usd >= 0.0001:
-        p_str = f"${price_usd:,.6f}"
-    elif price_usd > 0:
-        p_str = f"${price_usd:,.10f}".rstrip("0")
-    else:
-        p_str = "$0.00"
-
-    # Transactions & Volume (5m or 1h)
-    tx = pair.get("txns", {}).get("m5") or pair.get("txns", {}).get("h1") or {}
-    buys = int(tx.get("buys") or 0)
-    sells = int(tx.get("sells") or 0)
+    txns_h1 = (pair.get("txns") or {}).get("h1") or {}
+    buys = int(txns_h1.get("buys") or 0)
+    sells = int(txns_h1.get("sells") or 0)
     total_tx = buys + sells
-    ratio_str = f"{(buys/total_tx*100):.0f}% Buys 🟢" if total_tx > 0 else "Fresh Listing"
+    ratio_str = f"{(buys / total_tx * 100):.0f}% Buy" if total_tx > 0 else "New Pool"
 
-    # Socials
-    socials = (pair.get("info") or {}).get("socials") or []
+    if price_usd <= 0:
+        p_str = "$0.00"
+    elif price_usd < 0.0001:
+        p_str = f"${price_usd:.8f}".rstrip("0").rstrip(".")
+    elif price_usd < 1:
+        p_str = f"${price_usd:.6f}".rstrip("0").rstrip(".")
+    else:
+        p_str = f"${price_usd:,.4f}".rstrip("0").rstrip(".")
+
+    info = pair.get("info") or {}
+    socials = info.get("socials") or []
     has_twitter = any((s.get("type") or "").lower() == "twitter" for s in socials)
     has_tg = any((s.get("type") or "").lower() == "telegram" for s in socials)
-    if has_twitter and has_tg:
-        social_status = "Twitter & TG Active ✅"
-    elif has_twitter:
-        social_status = "Twitter Active ✅"
-    elif has_tg:
-        social_status = "Telegram Active ✅"
-    else:
-        social_status = "No Socials Found ⚠️"
 
-    # RugCheck Live Data vs Default Pump.fun Graduation Standards
+    if has_twitter and has_tg:
+        social_status = "Twitter &amp; TG Active"
+    elif has_twitter:
+        social_status = "Twitter Active"
+    elif has_tg:
+        social_status = "Telegram Active"
+    else:
+        social_status = "No Socials"
+
     if security:
-        verdict_badge = security.get("verdict_badge", "🟢 GOOD")
+        verdict = security.get("verdict", "GOOD")
         score = security.get("score_normalised", 0)
         mint_ok = security.get("mint_authority") is None
         freeze_ok = security.get("freeze_authority") is None
         lp_locked = float(security.get("lp_locked_pct") or 100.0)
         top10 = float(security.get("top10_pct") or 0.0)
         insiders = int(security.get("insiders_count") or 0)
-        top10_icon = "🟢" if top10 <= 25 else ("🟡" if top10 <= 45 else "🔴")
-        insider_str = f" | 🚨 {insiders} Insiders" if insiders > 0 else ""
+        insider_str = f" | Insiders: {insiders}" if insiders > 0 else ""
 
         safety_lines = [
-            f"🛡️ <b>RUGCHECK AUDIT:</b> {verdict_badge} <code>(Risk: {score}/100)</code>",
-            f"├ LP Status       : <code>{lp_locked:.0f}% LOCKED/BURNED 🔒</code>",
-            f"├ Mint / Freeze   : <code>{'REVOKED ✅' if mint_ok else 'ACTIVE 🚨'}</code> / <code>{'DISABLED ✅' if freeze_ok else 'ACTIVE 🚨'}</code>",
-            f"├ Top 10 Holders  : {top10_icon} <code>{top10:.1f}%</code>{insider_str}",
-            f"└ Community       : {social_status}",
+            f"RugCheck   : {verdict} (Risk: {score}/100)",
+            f"LP Status  : {lp_locked:.0f}% Locked/Burned",
+            f"Authority  : Mint {'Revoked' if mint_ok else 'ACTIVE'} | Freeze {'Disabled' if freeze_ok else 'ACTIVE'}",
+            f"Top 10 Hold: {top10:.1f}%{insider_str}",
+            f"Community  : {social_status}",
         ]
     else:
         safety_lines = [
-            "🛡️ <b>SAFETY & LIQUIDITY:</b>",
-            "├ LP Status       : 100% BURNED & LOCKED 🔒",
-            "├ Mint Authority  : REVOKED ✅",
-            "├ Freeze Authority: DISABLED ✅",
-            f"└ Community       : {social_status}",
+            "LP Status  : 100% Burned &amp; Locked",
+            "Authority  : Mint Revoked | Freeze Disabled",
+            f"Community  : {social_status}",
         ]
 
-    lines = [
-        "🚨 <b>ALPHA SNIPER: GRADUATED TO RAYDIUM!</b>",
-        f"<b>💎 {name} (${symbol})</b>",
-        f"<i>Pair: ${symbol} / ${quote_sym} | Pool: Raydium</i>",
+    pre_lines = [
+        f"GRADUATED TO RAYDIUM: {name} ({symbol})",
+        f"Pair: {symbol}/{quote_sym} | Pool: Raydium",
         "━━━━━━━━━━━━━━━━━━━━━",
-        f"💵 <b>Market Cap:</b> <code>${mcap:,.0f}</code> (Early Entry!)",
-        f"💧 <b>Liquidity:</b> <code>${liq_usd:,.0f}</code> (100% BURNED 🔒)",
-        f"💲 <b>Price:</b> <code>{p_str}</code>",
-        f"⚡ <b>Momentum:</b> <code>{buys} Buys / {sells} Sells</code> ({ratio_str})",
-        "",
+        f"Price      : {p_str}",
+        f"Market Cap : ${mcap:,.0f}",
+        f"Liquidity  : ${liq_usd:,.0f}",
+        f"Txns (1h)  : {buys}B / {sells}S ({ratio_str})",
+        "━━━━━━━━━━━━━━━━━━━━━",
         *safety_lines,
-        "",
-        "📝 <b>Contract Address (Tap to copy):</b>",
-        f"<code>{ca}</code>",
     ]
 
-    text = "\n".join(lines)
+    text = f"<pre>{'\n'.join(pre_lines)}</pre>\n<b>CA:</b> <code>{ca}</code>"
 
-    # Direct Sniper Buttons
     row1 = [
-        InlineKeyboardButton(text="⚡ Snipe (Photon)", url=f"https://photon-sol.tinyastro.io/en/r/@cekrego/{ca}"),
-        InlineKeyboardButton(text="🐂 BullX", url=f"https://bullx.io/terminal?chainId=1399811149&address={ca}"),
+        InlineKeyboardButton(text="Photon", url=f"https://photon-sol.tinyastro.io/en/r/@cekrego/{ca}"),
+        InlineKeyboardButton(text="BullX", url=f"https://bullx.io/terminal?chainId=1399811149&address={ca}"),
     ]
     row2 = [
-        InlineKeyboardButton(text="🦅 DexScreener", url=pair.get("url") or f"https://dexscreener.com/solana/{ca}"),
-        InlineKeyboardButton(text="🛡️ RugCheck", url=f"https://rugcheck.xyz/tokens/{ca}"),
+        InlineKeyboardButton(text="DexScreener", url=pair.get("url") or f"https://dexscreener.com/solana/{ca}"),
+        InlineKeyboardButton(text="RugCheck", url=f"https://rugcheck.xyz/tokens/{ca}"),
     ]
     for s in socials:
         stype = (s.get("type") or "").lower()
         surl = s.get("url")
         if stype == "twitter" and surl and len(row2) < 3:
-            row2.append(InlineKeyboardButton(text="🐦 Twitter/X", url=surl))
+            row2.append(InlineKeyboardButton(text="Twitter/X", url=surl))
         elif stype == "telegram" and surl and len(row2) < 3:
-            row2.append(InlineKeyboardButton(text="💬 Telegram", url=surl))
+            row2.append(InlineKeyboardButton(text="Telegram", url=surl))
 
     kb = InlineKeyboardMarkup(inline_keyboard=[row1, row2])
     return text, kb

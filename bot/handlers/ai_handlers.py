@@ -91,8 +91,20 @@ async def callback_ai_select(call: CallbackQuery):
     await call.answer()
     coin_id = call.data.split(":")[1]
     await call.message.edit_reply_markup(reply_markup=None)
-    await call.message.edit_text("🧠 _Analyzing Data & Searching News\\.\\.\\._", parse_mode="MarkdownV2")
+    await call.message.edit_text("_Analyzing Data & Searching News\\.\\.\\._", parse_mode="MarkdownV2")
     await run_ai_analysis(call.message, coin_id)
+
+
+@router.callback_query(F.data.startswith("ai_run:"))
+async def callback_ai_run(call: CallbackQuery):
+    await call.answer("Running AI analysis...")
+    coin_id = call.data.split(":", 1)[1]
+    if call.message.text and "AI PREDICTION:" in call.message.text:
+        await call.message.edit_text("_Refreshing AI Analysis\\.\\.\\._", parse_mode="MarkdownV2")
+        await run_ai_analysis(call.message, coin_id)
+    else:
+        msg_wait = await call.message.reply("_Analyzing Data & Searching News\\.\\.\\._", parse_mode="MarkdownV2")
+        await run_ai_analysis(msg_wait, coin_id)
 
 
 async def run_ai_analysis(message_obj, coin_id):
@@ -100,7 +112,7 @@ async def run_ai_analysis(message_obj, coin_id):
         analysis = await services.get_market_analysis(coin_id)
 
         if not analysis or not analysis.get('gemini'):
-            await message_obj.edit_text("❌ Data tidak cukup/AI error\\.", parse_mode="MarkdownV2")
+            await message_obj.edit_text("Data tidak cukup / AI error\\.", parse_mode="MarkdownV2")
             return
 
         coin = analysis['coin']
@@ -115,17 +127,17 @@ async def run_ai_analysis(message_obj, coin_id):
 
         action = _normalize_action(ai_json.get("action"))
         if action == "WAIT":
-            sig_icon = "⚪ WAIT / NEUTRAL"
+            sig_icon = "WAIT / NEUTRAL"
             entry_display = "N/A"
             tp_display = "N/A"
             sl_display = "N/A"
         elif action == "LONG":
-            sig_icon = "🟢 LONG / BUY"
+            sig_icon = "LONG / BUY"
             entry_display = fmt_usd_raw(_safe_float(ai_json.get("entry")))
             tp_display = fmt_usd_raw(_safe_float(ai_json.get("takeProfit")))
             sl_display = fmt_usd_raw(_safe_float(ai_json.get("stopLoss")))
         else:
-            sig_icon = "🔴 SHORT / SELL"
+            sig_icon = "SHORT / SELL"
             entry_display = fmt_usd_raw(_safe_float(ai_json.get("entry")))
             tp_display = fmt_usd_raw(_safe_float(ai_json.get("takeProfit")))
             sl_display = fmt_usd_raw(_safe_float(ai_json.get("stopLoss")))
@@ -153,39 +165,51 @@ async def run_ai_analysis(message_obj, coin_id):
 
         price = fmt_usd_raw(coin.get('current_price', 0))
         change = coin.get('price_change_percentage_24h', 0) or 0
-        arrow = "📈" if change >= 0 else "📉"
+        sign = "+" if change >= 0 else ""
         conf_str = f"{confidence}%"
         setup_str = f"{setup_quality}/100"
+        sym_lower = (coin.get('symbol') or coin_id).lower()
 
         final_text = (
             f"```\n"
             f"AI PREDICTION: {coin.get('name','').upper()}\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"Price: ${price}\n"
-            f"24h: {arrow} {fmt_pct_raw(change)} | Confidence: {conf_str}\n"
-            f"Bias: {tech.get('global_bias','-')} | RSI: {float(tech.get('rsi',0)):.1f}\n"
-            f"Risk: {risk_label} ({risk_score_int}/10) | RRR: {rrr} | Risk/Trade: {pos_risk}\n"
-            f"Setup Quality: {setup_str} | Tech Vote: {tech_action} ({tech_points})\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"SIGNAL: {sig_icon}\n"
-            f"ENTRY: {entry_display}\n"
-            f"TP: {tp_display}\n"
-            f"SL: {sl_display}\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"----------------------------------------\n"
+            f"Price  : ${price} ({sign}{fmt_pct_raw(change)})\n"
+            f"Conf   : {conf_str} | Setup: {setup_str}\n"
+            f"Bias   : {tech.get('global_bias','-')} | RSI: {float(tech.get('rsi',0)):.1f}\n"
+            f"Risk   : {risk_label} ({risk_score_int}/10) | RRR: {rrr} | Risk/Trade: {pos_risk}\n"
+            f"Tech   : {tech_action} ({tech_points})\n"
+            f"----------------------------------------\n"
+            f"SIGNAL : {sig_icon}\n"
+            f"ENTRY  : {entry_display}\n"
+            f"TP     : {tp_display}\n"
+            f"SL     : {sl_display}\n"
+            f"----------------------------------------\n"
             f"Reasoning:\n"
             f"{ai_json.get('reasoning','-')}\n"
             f"```\n"
             f">*Market News:*\n"
             f">_{news_summary}_\n"
             f">{sources_text}\n"
-            f"*Disclaimer: AI Prediction based on Tech\\+Fund data\\. DYOR\\!*"
+            f"_Disclaimer: AI Prediction based on Tech\\+Fund data\\. DYOR\\._"
         )
 
-        await message_obj.edit_text(final_text, parse_mode="MarkdownV2", disable_web_page_preview=True)
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Chart 1H", callback_data=f"chart:{coin_id}:{sym_lower}:1h"),
+                InlineKeyboardButton(text="Chart 4H", callback_data=f"chart:{coin_id}:{sym_lower}:4h"),
+                InlineKeyboardButton(text="Chart 1D", callback_data=f"chart:{coin_id}:{sym_lower}:1"),
+            ],
+            [
+                InlineKeyboardButton(text="Refresh AI", callback_data=f"ai_run:{coin_id}"),
+            ]
+        ])
+
+        await message_obj.edit_text(final_text, parse_mode="MarkdownV2", reply_markup=kb, disable_web_page_preview=True)
 
     except Exception as e:
         logging.error(f"Run AI Error: {e}")
-        await message_obj.edit_text(f"❌ Error: `{escape_md(str(e))}`", parse_mode="MarkdownV2")
+        await message_obj.edit_text(f"Error: `{escape_md(str(e))}`", parse_mode="MarkdownV2")
 
 
 @router.message(Command("ask"))
@@ -296,7 +320,7 @@ async def cmd_x70_signals(message: Message):
         signal = await get_x70_signal_for_coin(target_coin)
         if not signal:
             await message.reply(
-                f"ℹ️ Belum ada sinyal quant aktif untuk #{target_coin} di <code>signals.x70.ai</code>.\n"
+                f"Belum ada sinyal quant aktif untuk #{target_coin} di <code>signals.x70.ai</code>.\n"
                 f"Gunakan <code>/signals</code> untuk melihat seluruh sinyal quant yang sedang aktif.",
                 parse_mode="HTML"
             )
@@ -308,17 +332,15 @@ async def cmd_x70_signals(message: Message):
     signals = await get_x70_signals(limit=3)
     if not signals:
         await message.reply(
-            "ℹ️ Belum ada sinyal quant aktif di <code>signals.x70.ai</code> saat ini. Coba beberapa saat lagi.",
+            "Belum ada sinyal quant aktif di <code>signals.x70.ai</code> saat ini. Coba beberapa saat lagi.",
             parse_mode="HTML"
         )
         return
 
     cards = [format_x70_signal_card(s) for s in signals[:2]]
-    body = "\n\n━━━━━━━━━━━━━━━━━━━━\n\n".join(cards)
+    body = "\n\n".join(cards)
     text = (
-        f"📡 <b>LIVE QUANT SIGNALS (SIGNALS.X70.AI)</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"{body}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━"
+        f"<b>LIVE QUANT SIGNALS (SIGNALS.X70.AI)</b>\n"
+        f"{body}"
     )
     await message.reply(text, parse_mode="HTML")
