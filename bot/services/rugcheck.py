@@ -314,13 +314,13 @@ async def get_token_security(chain_id: str, token_address: str, force_refresh: b
 
 def format_security_block_compact(sec: Optional[Dict[str, Any]]) -> str:
     """
-    Format ringkas untuk disisipkan langsung ke dalam kartu /dex (gaya minimalis).
+    Format ringkas untuk disisipkan langsung ke dalam kartu /dex atau sinyal @cekrego.
     """
     if not sec:
         return ""
 
     chain = sec.get("chain", "solana")
-    verdict = sec.get("verdict", "UNKNOWN")
+    verdict_badge = sec.get("verdict_badge", "⚪ UNKNOWN")
     score = sec.get("score_normalised", 0)
 
     if chain == "solana":
@@ -330,21 +330,22 @@ def format_security_block_compact(sec: Optional[Dict[str, Any]]) -> str:
         top10 = float(sec.get("top10_pct") or 0.0)
         insiders = int(sec.get("insiders_count") or 0)
 
-        mint_str = "Revoked" if mint_ok else "ACTIVE (!)"
-        freeze_str = "Disabled" if freeze_ok else "ACTIVE (!)"
-        lp_str = f"{lp_locked:.1f}% Locked" if lp_locked > 0 else "Unlocked/Check Pool"
-        insider_str = f" | Insiders: {insiders}" if insiders > 0 else ""
+        mint_str = "Revoked ✅" if mint_ok else "ACTIVE 🚨"
+        freeze_str = "Disabled ✅" if freeze_ok else "ACTIVE 🚨"
+        lp_str = f"{lp_locked:.1f}% 🔒" if lp_locked >= 80 else (f"{lp_locked:.1f}% ⚠️" if lp_locked > 0 else "Unlocked/Check Pool")
+        top10_icon = "🟢" if top10 <= 25 else ("🟡" if top10 <= 45 else "🔴")
+        insider_str = f" | 🚨 {insiders} Insiders" if insiders > 0 else ""
 
         lines = [
-            f"RUGCHECK   : {verdict} (Risk: {score}/100)",
-            f"Authority  : Mint {mint_str} | Freeze {freeze_str}",
-            f"LP Status  : {lp_str}",
-            f"Top 10 Hold: {top10:.1f}%{insider_str}",
+            f"🛡️ <b>RUGCHECK AUDIT:</b> {verdict_badge} <code>(Risk: {score}/100)</code>",
+            f"├ Mint / Freeze : <code>{mint_str}</code> | <code>{freeze_str}</code>",
+            f"├ LP Locked     : <code>{lp_str}</code>",
+            f"└ Top 10 Holder : {top10_icon} <code>{top10:.1f}%</code>{insider_str}",
         ]
         risks = sec.get("risks") or []
         if risks:
             top_risk = html.escape(risks[0].get("name", ""))
-            lines.append(f"Note       : {top_risk}")
+            lines.append(f"⚠️ <i>Note: {top_risk}</i>")
         return "\n".join(lines) + "\n"
 
     # EVM Compact Format
@@ -355,21 +356,21 @@ def format_security_block_compact(sec: Optional[Dict[str, Any]]) -> str:
     sell_tax = float(sec.get("sell_tax") or 0.0)
     top10 = float(sec.get("top10_pct") or 0.0)
 
-    hp_str = "HONEYPOT (!)" if hp else "Safe"
-    os_str = "Verified" if os_ok else "Unverified (!)"
-    own_str = "Renounced" if renounced else "Active"
+    hp_str = "HONEYPOT 🚨" if hp else "Safe ✅"
+    os_str = "Verified ✅" if os_ok else "Unverified 🚨"
+    own_str = "Renounced ✅" if renounced else "Active ⚠️"
     lines = [
-        f"SECURITY   : {verdict} (Risk: {score}/100)",
-        f"Contract   : {hp_str} | Source {os_str}",
-        f"Tax (B/S)  : {buy_tax:.1f}% / {sell_tax:.1f}% | Owner: {own_str}",
-        f"Top 10 Hold: {top10:.1f}%",
+        f"🛡️ <b>SECURITY AUDIT:</b> {verdict_badge} <code>(Risk: {score}/100)</code>",
+        f"├ Honeypot / Src: <code>{hp_str}</code> | <code>{os_str}</code>",
+        f"├ Tax (B / S)   : <code>{buy_tax:.1f}% / {sell_tax:.1f}%</code> | Owner: <code>{own_str}</code>",
+        f"└ Top 10 Holder : <code>{top10:.1f}%</code>",
     ]
     return "\n".join(lines) + "\n"
 
 
 def format_full_rugcheck_card(sec: Dict[str, Any], pair: Optional[Dict[str, Any]] = None) -> str:
     """
-    Format laporan lengkap untuk command /rug atau tombol Detail RugCheck (gaya minimalis).
+    Format laporan lengkap untuk command /rug atau tombol Detail RugCheck.
     """
     chain = sec.get("chain", "solana").upper()
     source = sec.get("source", "RugCheck")
@@ -378,15 +379,15 @@ def format_full_rugcheck_card(sec: Dict[str, Any], pair: Optional[Dict[str, Any]
     base = (pair or {}).get("baseToken") or {}
     name = html.escape(sec.get("name") or base.get("name") or "Unknown Token")
     symbol = html.escape((sec.get("symbol") or base.get("symbol") or "?").upper())
-    verdict = sec.get("verdict", "UNKNOWN")
+    verdict_badge = sec.get("verdict_badge", "⚪ UNKNOWN")
     score = sec.get("score_normalised", 0)
 
     lines = [
-        f"SECURITY AUDIT: {name.upper()} ({symbol})",
-        f"Chain : {chain} | Source: {html.escape(source)}",
+        f"🛡️ <b>ON-CHAIN SECURITY AUDIT ({chain})</b>",
+        f"<b>💎 {name} (${symbol})</b>",
         "━━━━━━━━━━━━━━━━━━━━━",
-        f"Status     : {verdict}",
-        f"Risk Score : {score} / 100 (Lower is safer)",
+        f"📊 <b>Status:</b> {verdict_badge}",
+        f"🎯 <b>Risk Score:</b> <code>{score} / 100</code> <i>(Makin rendah makin aman)</i>",
     ]
 
     if sec.get("chain") == "solana":
@@ -399,18 +400,18 @@ def format_full_rugcheck_card(sec: Dict[str, Any], pair: Optional[Dict[str, Any]
         total_holders = int(sec.get("total_holders") or 0)
 
         lines.extend([
-            "━━━━━━━━━━━━━━━━━━━━━",
-            "CONTRACT &amp; AUTHORITY",
-            f"Mint Auth  : {'Revoked (Safe)' if mint_ok else 'ACTIVE (Warning!)'}",
-            f"Freeze Auth: {'Disabled (Safe)' if freeze_ok else 'ACTIVE (Warning!)'}",
-            f"Metadata   : {'Immutable' if not mut else 'Mutable'}",
-            f"LP Locked  : {lp_locked:.2f}%",
-            f"Insiders   : {'0 Detected' if insiders == 0 else f'{insiders} Detected (!)'}",
-            "━━━━━━━━━━━━━━━━━━━━━",
-            f"HOLDERS ({total_holders:,} Total)",
-            f"Top 10 (Non-LP): {sec.get('top10_pct', 0):.2f}%",
-            f"Top 1  (Non-LP): {sec.get('top1_pct', 0):.2f}%",
-            f"Creator Balance: {creator_pct:.2f}%",
+            "",
+            "🔒 <b>CONTRACT & AUTHORITY:</b>",
+            f"├ Mint Authority  : {'🟢 Revoked (Aman)' if mint_ok else '🔴 ACTIVE (Bisa Cetak Token!)'}",
+            f"├ Freeze Authority: {'🟢 Disabled (Aman)' if freeze_ok else '🔴 ACTIVE (Bisa Freeze Wallet!)'}",
+            f"├ Metadata Status : {'🟢 Immutable' if not mut else '🟡 Mutable (Bisa Diubah)'}",
+            f"├ LP Locked/Burned: <code>{lp_locked:.2f}%</code> {'🔒' if lp_locked >= 80 else '⚠️'}",
+            f"└ Insider Networks: {'🟢 0 Detected' if insiders == 0 else f'🔴 {insiders} Insiders Terdeteksi!'}",
+            "",
+            f"👥 <b>HOLDER DISTRIBUTION ({total_holders:,} Holders):</b>",
+            f"├ Top 10 Holders (Non-LP): <code>{sec.get('top10_pct', 0):.2f}%</code>",
+            f"├ Top 1 Holder (Non-LP)  : <code>{sec.get('top1_pct', 0):.2f}%</code>",
+            f"└ Creator Balance        : <code>{creator_pct:.2f}%</code>",
         ])
     else:
         hp = sec.get("is_honeypot", False)
@@ -422,39 +423,51 @@ def format_full_rugcheck_card(sec: Dict[str, Any], pair: Optional[Dict[str, Any]
         total_holders = int(sec.get("total_holders") or 0)
 
         lines.extend([
-            "━━━━━━━━━━━━━━━━━━━━━",
-            "CONTRACT SECURITY",
-            f"Honeypot   : {'YES (DANGER!)' if hp else 'No (Safe)'}",
-            f"Source Code: {'Verified' if os_ok else 'Unverified (!)'}",
-            f"Ownership  : {'Renounced' if renounced else 'Active Owner'}",
-            f"Mintable   : {'Yes (!)' if mintable else 'No'}",
-            f"Tax (B/S)  : {buy_tax:.1f}% / {sell_tax:.1f}%",
-            "━━━━━━━━━━━━━━━━━━━━━",
-            f"HOLDERS ({total_holders:,} Total)",
-            f"Top 10 (Non-LP): {sec.get('top10_pct', 0):.2f}%",
+            "",
+            "🔒 <b>CONTRACT SECURITY:</b>",
+            f"├ Honeypot Check : {'🔴 HONEYPOT!' if hp else '🟢 Aman (Bukan Honeypot)'}",
+            f"├ Source Code    : {'🟢 Verified (Open Source)' if os_ok else '🔴 Unverified!'}",
+            f"├ Ownership      : {'🟢 Renounced' if renounced else '🟡 Active Owner'}",
+            f"├ Mintable       : {'🔴 Ya (Bisa Mint)' if mintable else '🟢 Tidak'}",
+            f"└ Tax (Buy/Sell) : <code>{buy_tax:.1f}% / {sell_tax:.1f}%</code>",
+            "",
+            f"👥 <b>HOLDER DISTRIBUTION ({total_holders:,} Holders):</b>",
+            f"└ Top 10 Holders (Non-LP): <code>{sec.get('top10_pct', 0):.2f}%</code>",
         ])
 
+    # Top 5 Non-LP Holders list
     holders = sec.get("top_holders") or []
     if holders:
         lines.append("")
-        lines.append("TOP 5 WALLETS (NON-LP):")
+        lines.append("🐋 <b>TOP 5 WALLETS (EXCLUDING LP/DEX):</b>")
         for idx, h in enumerate(holders[:5], 1):
             addr = h.get("address") or ""
             short_addr = f"{addr[:4]}...{addr[-4:]}" if len(addr) > 10 else addr
             pct = float(h.get("pct") or 0.0)
-            ins_tag = " [INSIDER]" if h.get("insider") else ""
+            ins_tag = " 🚨[INSIDER]" if h.get("insider") else ""
             lbl = f" ({html.escape(h['label'])})" if h.get("label") else ""
-            lines.append(f"{idx}. {short_addr:<11} {pct:>6.2f}%{lbl}{ins_tag}")
+            lines.append(f"  {idx}. <code>{short_addr}</code> — <b>{pct:.2f}%</b>{lbl}{ins_tag}")
 
+    # Risk Warnings
     risks = sec.get("risks") or []
     if risks:
-        lines.append("━━━━━━━━━━━━━━━━━━━━━")
-        lines.append("RISK FLAGS:")
+        lines.append("")
+        lines.append("⚠️ <b>DETECTED RISK FLAGS:</b>")
         for r in risks[:5]:
-            lvl = r.get("level", "warn").upper()
+            lvl = r.get("level", "warn")
+            icon = "🔴" if lvl in ("danger", "critical", "high") else "🟡"
             r_name = html.escape(r.get("name", ""))
             r_val = f" ({html.escape(r['value'])})" if r.get("value") else ""
-            lines.append(f"- [{lvl}] {r_name}{r_val}")
+            lines.append(f"• {icon} {r_name}{r_val}")
+    else:
+        lines.append("")
+        lines.append("✅ <b>Tidak ditemukan flag risiko kritis pada kontrak ini.</b>")
 
-    body = "\n".join(lines)
-    return f"<pre>{body}</pre>\n<b>CA:</b> <code>{html.escape(mint)}</code>"
+    lines.extend([
+        "",
+        "📝 <b>Contract Address:</b>",
+        f"<code>{html.escape(mint)}</code>",
+        f"<i>Source: {html.escape(source)}</i>"
+    ])
+    return "\n".join(lines)
+

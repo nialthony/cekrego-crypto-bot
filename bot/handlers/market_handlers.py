@@ -1249,26 +1249,27 @@ def _format_pct_html(val):
     except:
         return "0.00%"
     sign = "+" if n > 0 else ""
-    return f"{sign}{n:.2f}%"
+    icon = "🟢" if n > 0 else "🔴" if n < 0 else "⚪"
+    return f"{icon} {sign}{n:.2f}%"
 
 CHAIN_BADGES = {
-    "solana": ("SOLANA", "Solana"),
-    "base": ("BASE", "Base"),
-    "ethereum": ("ETHEREUM", "Ethereum"),
-    "bsc": ("BNB CHAIN", "BNB Chain"),
-    "arbitrum": ("ARBITRUM", "Arbitrum"),
-    "polygon": ("POLYGON", "Polygon"),
-    "avalanche": ("AVALANCHE", "Avalanche"),
-    "sui": ("SUI", "Sui"),
-    "tron": ("TRON", "Tron"),
-    "optimism": ("OPTIMISM", "Optimism"),
-    "blast": ("BLAST", "Blast"),
-    "fantom": ("FANTOM", "Fantom"),
+    "solana": ("🪐 SOLANA", "Solana"),
+    "base": ("🔵 BASE", "Base"),
+    "ethereum": ("🦄 ETHEREUM", "Ethereum"),
+    "bsc": ("🟡 BNB CHAIN", "BNB Chain"),
+    "arbitrum": ("🔷 ARBITRUM", "Arbitrum"),
+    "polygon": ("💜 POLYGON", "Polygon"),
+    "avalanche": ("🔺 AVALANCHE", "Avalanche"),
+    "sui": ("💧 SUI", "Sui"),
+    "tron": ("🔴 TRON", "Tron"),
+    "optimism": ("🔴 OPTIMISM", "Optimism"),
+    "blast": ("💥 BLAST", "Blast"),
+    "fantom": ("👻 FANTOM", "Fantom"),
 }
 
 def _get_chain_badge(chain_id):
     c = str(chain_id or "").lower()
-    return CHAIN_BADGES.get(c, (c.upper(), c.title()))
+    return CHAIN_BADGES.get(c, (f"⛓️ {c.upper()}", c.title()))
 
 def _build_dex_card(pair: dict, other_pairs=None, security: dict = None):
     chain_id = str(pair.get("chainId") or "unknown").lower()
@@ -1290,9 +1291,9 @@ def _build_dex_card(pair: dict, other_pairs=None, security: dict = None):
 
     base = pair.get("baseToken") or {}
     quote = pair.get("quoteToken") or {}
-    token_name = str(base.get("name") or "Unknown")
-    token_symbol = str(base.get("symbol") or "?").upper()
-    quote_symbol = str(quote.get("symbol") or "?").upper()
+    token_name = html.escape(str(base.get("name") or "Unknown"))
+    token_symbol = html.escape(str(base.get("symbol") or "?").upper())
+    quote_symbol = html.escape(str(quote.get("symbol") or "?").upper())
     ca = str(base.get("address") or "-")
     pair_addr = str(pair.get("pairAddress") or "")
 
@@ -1320,56 +1321,61 @@ def _build_dex_card(pair: dict, other_pairs=None, security: dict = None):
     if total_tx > 0:
         buy_pct = (buys / total_tx) * 100
         if buy_pct >= 60:
-            flow_label = f"Bullish ({buy_pct:.0f}% Buys)"
+            flow_label = f"🟢 Bullish ({buy_pct:.0f}% Buys)"
         elif buy_pct <= 40:
-            flow_label = f"Bearish ({100 - buy_pct:.0f}% Sells)"
+            flow_label = f"🔴 Bearish ({100 - buy_pct:.0f}% Sells)"
         else:
-            flow_label = f"Balanced ({buy_pct:.0f}% Buys)"
+            flow_label = f"🟡 Balanced ({buy_pct:.0f}% Buys)"
     else:
-        flow_label = "No Data"
+        flow_label = "⚪ No Data"
 
     # Smart Risk Warnings
     warnings = []
     if liq_usd < 10000:
-        warnings.append("Note: Low Liquidity (<$10K) - risiko slippage / rug tinggi.")
+        warnings.append("⚠️ <b>LOW LIQUIDITY (&lt;$10K):</b> Risiko slippage ekstrem / rawan rug pull!")
     elif liq_usd < 35000:
-        warnings.append("Note: Moderate Liquidity - likuiditas terbatas.")
+        warnings.append("⚠️ <b>MODERATE LIQUIDITY:</b> Likuiditas terbatas, waspada fluktuasi tajam.")
 
     if total_tx >= 20:
         if sells > (buys * 2.5):
-            warnings.append("Alert: Tekanan jual mendominasi transaksi.")
+            warnings.append("🚨 <b>DUMP ALERT:</b> Tekanan jual masif mendominasi transaksi!")
         elif buys > (sells * 2.5):
-            warnings.append("Alert: Akumulasi beli kuat.")
+            warnings.append("🚀 <b>MOMENTUM ALERT:</b> Akumulasi beli sangat kuat!")
 
     if float(mcap) > 0 and (liq_usd / float(mcap)) < 0.02 and liq_usd > 0:
-        warnings.append("Note: Rasio likuiditas tipis (<2% dari Market Cap).")
+        warnings.append("⚠️ <b>LOW LIQ RATIO (&lt;2% MC):</b> Likuiditas tipis dibanding Market Cap.")
 
-    lines = [
-        f"DEX RADAR: {token_name} ({token_symbol}/{quote_symbol})",
-        f"Chain     : {chain_badge} | {dex_name}",
-        "----------------------------------------",
-        f"Price     : {price_str}",
-        f"MCap/FDV  : {_format_dex_compact(mcap)} / {_format_dex_compact(fdv)}",
-        f"Liquidity : {_format_dex_compact(liq_usd)} | Age: {age_str}",
-        "",
-        f"Change    : 5m {c_5m} | 1h {c_1h} | 6h {c_6h} | 24h {c_24h}",
-        f"Volume 24h: {vol_24h} ({buys:,} Buys / {sells:,} Sells)",
-        f"Orderflow : {flow_label}",
-    ]
-
+    warning_block = ""
     if warnings:
-        lines.append("")
-        lines.extend(warnings)
+        warning_block = "\n" + "\n".join(warnings) + "\n"
 
-    pre_main = f"<pre>{html.escape(chr(10).join(lines))}</pre>"
     security_block = ""
     if security:
         security_block = "\n" + services.format_security_block_compact(security)
 
     text = (
-        f"{pre_main}"
-        f"{security_block}\n"
-        f"<b>CA:</b> <code>{html.escape(ca)}</code>"
+        f"<b>{chain_badge} | {dex_name}</b>\n"
+        f"<b>💎 {token_name} (${token_symbol})</b>\n"
+        f"<i>Pair: ${token_symbol} / ${quote_symbol}</i>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💵 <b>Price:</b> <code>{price_str}</code>\n"
+        f"💎 <b>Market Cap:</b> <code>{_format_dex_compact(mcap)}</code> | <b>FDV:</b> <code>{_format_dex_compact(fdv)}</code>\n"
+        f"💧 <b>Liquidity:</b> <code>{_format_dex_compact(liq_usd)}</code>\n"
+        f"⏳ <b>Age:</b> <code>{age_str}</code>\n\n"
+        f"📊 <b>PRICE CHANGE:</b>\n"
+        f"├ 5m  : {c_5m}\n"
+        f"├ 1h  : {c_1h}\n"
+        f"├ 6h  : {c_6h}\n"
+        f"└ 24h : {c_24h}\n\n"
+        f"⚡ <b>TRANSACTIONS (24h):</b>\n"
+        f"├ Volume : <code>{vol_24h}</code>\n"
+        f"├ Buys   : <code>{buys:,}</code>\n"
+        f"├ Sells  : <code>{sells:,}</code>\n"
+        f"└ Flow   : {flow_label}\n"
+        f"{security_block}"
+        f"{warning_block}\n"
+        f"📝 <b>Contract Address (Tap to copy):</b>\n"
+        f"<code>{html.escape(ca)}</code>"
     )
 
     # Store token in refresh cache
@@ -1388,19 +1394,19 @@ def _build_dex_card(pair: dict, other_pairs=None, security: dict = None):
     # Row 1: DexScreener + Direct Trade Link
     row1 = []
     dex_url = pair.get("url") or f"https://dexscreener.com/{chain_id}/{pair_addr}"
-    row1.append(InlineKeyboardButton(text="DexScreener", url=dex_url))
+    row1.append(InlineKeyboardButton(text="🦅 DexScreener", url=dex_url))
 
     if chain_id == "solana":
-        row1.append(InlineKeyboardButton(text="Photon", url=f"https://photon-sol.tinyastro.io/en/r/@cekrego/{ca}"))
-        row1.append(InlineKeyboardButton(text="BullX", url=f"https://bullx.io/terminal?chainId=1399811149&address={ca}"))
+        row1.append(InlineKeyboardButton(text="⚡ Photon", url=f"https://photon-sol.tinyastro.io/en/r/@cekrego/{ca}"))
+        row1.append(InlineKeyboardButton(text="🐂 BullX", url=f"https://bullx.io/terminal?chainId=1399811149&address={ca}"))
     elif chain_id == "base":
-        row1.append(InlineKeyboardButton(text="Uniswap", url=f"https://app.uniswap.org/swap?outputCurrency={ca}&chain=base"))
+        row1.append(InlineKeyboardButton(text="🦄 Uniswap", url=f"https://app.uniswap.org/swap?outputCurrency={ca}&chain=base"))
     elif chain_id == "ethereum":
-        row1.append(InlineKeyboardButton(text="Uniswap", url=f"https://app.uniswap.org/swap?outputCurrency={ca}&chain=mainnet"))
+        row1.append(InlineKeyboardButton(text="🦄 Uniswap", url=f"https://app.uniswap.org/swap?outputCurrency={ca}&chain=mainnet"))
     elif chain_id == "bsc":
-        row1.append(InlineKeyboardButton(text="PancakeSwap", url=f"https://pancakeswap.finance/swap?outputCurrency={ca}&chain=bsc"))
+        row1.append(InlineKeyboardButton(text="🥞 Pancake", url=f"https://pancakeswap.finance/swap?outputCurrency={ca}&chain=bsc"))
     else:
-        row1.append(InlineKeyboardButton(text="Swap", url=dex_url))
+        row1.append(InlineKeyboardButton(text="🔄 Swap", url=dex_url))
     keyboard.append(row1)
 
     # Row 2: Socials (Twitter/X, Telegram)
@@ -1412,15 +1418,15 @@ def _build_dex_card(pair: dict, other_pairs=None, security: dict = None):
         if not surl:
             continue
         if stype == "twitter" and len(social_row) < 2:
-            social_row.append(InlineKeyboardButton(text="Twitter/X", url=surl))
+            social_row.append(InlineKeyboardButton(text="🐦 Twitter/X", url=surl))
         elif stype == "telegram" and len(social_row) < 3:
-            social_row.append(InlineKeyboardButton(text="Telegram", url=surl))
+            social_row.append(InlineKeyboardButton(text="💬 Telegram", url=surl))
 
     websites = (pair.get("info") or {}).get("websites") or []
     if websites and len(social_row) < 3:
         wurl = websites[0].get("url")
         if wurl:
-            social_row.append(InlineKeyboardButton(text="Website", url=wurl))
+            social_row.append(InlineKeyboardButton(text="🌐 Web", url=wurl))
 
     if social_row:
         keyboard.append(social_row)
@@ -1457,8 +1463,8 @@ def _build_dex_card(pair: dict, other_pairs=None, security: dict = None):
     # Row 4: RugCheck Detail + Refresh Button
     row4 = []
     if chain_id == "solana" or chain_id in ("ethereum", "bsc", "base", "arbitrum", "polygon", "optimism", "avalanche", "blast"):
-        row4.append(InlineKeyboardButton(text="RugCheck Audit", callback_data=f"dex_rug:{ref_token}"))
-    row4.append(InlineKeyboardButton(text="Refresh", callback_data=f"dex_ref:{ref_token}"))
+        row4.append(InlineKeyboardButton(text="🛡️ RugCheck Audit", callback_data=f"dex_rug:{ref_token}"))
+    row4.append(InlineKeyboardButton(text="🔄 Refresh Data", callback_data=f"dex_ref:{ref_token}"))
     keyboard.append(row4)
 
     return text, InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -1620,11 +1626,11 @@ async def cmd_rugcheck_audit(message: Message):
                 "time": time.time()
             }
             kb_rows.append([
-                InlineKeyboardButton(text="DEX Card", callback_data=f"dex_ref:{ref_token}"),
-                InlineKeyboardButton(text="Refresh Audit", callback_data=f"dex_rug:{ref_token}")
+                InlineKeyboardButton(text="📊 Lihat DEX Card", callback_data=f"dex_ref:{ref_token}"),
+                InlineKeyboardButton(text="🔄 Refresh Audit", callback_data=f"dex_rug:{ref_token}")
             ])
         if sec.get("url"):
-            kb_rows.append([InlineKeyboardButton(text=f"Buka di {sec.get('source', 'Scanner')}", url=sec["url"])])
+            kb_rows.append([InlineKeyboardButton(text=f"🌐 Buka di {sec.get('source', 'Scanner')}", url=sec["url"])])
 
         await msg_wait.edit_text(
             audit_text,
@@ -1685,11 +1691,11 @@ async def callback_dex_rugcheck(call: CallbackQuery):
         kb_rows = [
             [
                 InlineKeyboardButton(text="« Kembali ke DEX Card", callback_data=f"dex_ref:{ref_token}"),
-                InlineKeyboardButton(text="Refresh Audit", callback_data=f"dex_rug:{ref_token}")
+                InlineKeyboardButton(text="🔄 Refresh Audit", callback_data=f"dex_rug:{ref_token}")
             ]
         ]
         if sec.get("url"):
-            kb_rows.append([InlineKeyboardButton(text=f"Buka di {sec.get('source', 'Scanner')}", url=sec["url"])])
+            kb_rows.append([InlineKeyboardButton(text=f"🌐 Buka di {sec.get('source', 'Scanner')}", url=sec["url"])])
 
         await call.message.edit_text(
             audit_text,
